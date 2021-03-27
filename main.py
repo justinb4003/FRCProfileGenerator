@@ -1,31 +1,78 @@
 #!/usr/bin/env python3
+import enum
 import wx
 from wx.lib.splitter import MultiSplitterWindow
 
 
+class UIModes(enum.Enum):
+    AddNode = 1
+    DelNode = 2
+    MoveNode = 3
+
+
 class FieldPanel(wx.Panel):
+
     def __init__(self, parent):
         wx.Panel.__init__(self, parent=parent)
+        self.ui_mode = UIModes.AddNode
         hbox = wx.BoxSizer(wx.VERTICAL)
-        field = wx.Image('field.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
-        self.w = field.GetWidth()
-        self.h = field.GetHeight()
-        field_bmp = wx.StaticBitmap(parent=self,
-                                    id=-1,
-                                    bitmap=field,
-                                    pos=(0, 0),
-                                    size=(self.w, self.h))
-        hbox.Add(field_bmp, 0, wx.EXPAND | wx.ALL)
+        self.field = wx.Image('field.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
+        self.w = self.field.GetWidth()
+        self.h = self.field.GetHeight()
+        self.field_bmp = wx.StaticBitmap(parent=self,
+                                         id=-1,
+                                         bitmap=self.field,
+                                         pos=(0, 0),
+                                         size=(self.w, self.h))
+        self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
+        hbox.Add(self.field_bmp, 0, wx.EXPAND | wx.ALL)
+        self.SetSizer(hbox)
+        self.Fit()
+        
+    def set_ui_mode(self, new_mode: UIModes):
+        self.ui_mode = new_mode
+
+    def on_field_click(self, evt):
+        x, y = evt.GetPosition()
+        print(f'Clicky hit at {x},{y}')
+        if self.ui_mode == UIModes.AddNode:
+            self.add_node(x, y)
+        if self.ui_mode == UIModes.DelNode:
+            self.del_node(x, y)
+        if self.ui_mode == UIModes.MoveNode:
+            pass
+
+    def add_node(self, x, y):
+        print(f'Add node at {x}, {y}')
+        dc = wx.MemoryDC(self.field)
+        dc.SetPen(wx.Pen('red', 4))
+        dc.DrawCircle(x, y, 10)
+        del dc
+        self.field_bmp.SetBitmap(self.field)
+
+    def del_node(self, x, y):
+        print(f'Del node at {x}, {y}')
 
 
 class ControlPanel(wx.Panel):
-    def __init__(self, parent):
+    def __init__(self, field_panel: FieldPanel, parent):
+        self.field_panel = field_panel
         wx.Panel.__init__(self, parent=parent)
         add_waypoint = wx.Button(self, label='Add Waypoint')
         del_waypoint = wx.Button(self, label='Delete Waypoint')
+        add_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_add)
+        del_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_del)
         hbox = wx.BoxSizer(wx.VERTICAL)
         hbox.Add(add_waypoint, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(del_waypoint, 1, wx.EXPAND | wx.ALL)
+        hbox.Add(del_waypoint, 0, wx.EXPAND | wx.ALL)
+        self.SetSizer(hbox)
+        self.Fit()
+
+    def mode_set_add(self, evt):
+        self.field_panel.set_ui_mode(UIModes.AddNode)
+
+    def mode_set_del(self, evt):
+        self.field_panel.set_ui_mode(UIModes.DelNode)
 
 
 class MainWindow(wx.Frame):
@@ -38,7 +85,8 @@ class MainWindow(wx.Frame):
 
         self.splitter = MultiSplitterWindow(self, style=wx.SP_LIVE_UPDATE)
         self.field_panel = FieldPanel(self.splitter)
-        self.control_panel = ControlPanel(self.splitter)
+        self.control_panel = ControlPanel(self.field_panel,
+                                          self.splitter)
         self.splitter.AppendWindow(self.field_panel,
                                    sashPos=self.field_panel.w)
         self.splitter.AppendWindow(self.control_panel)
