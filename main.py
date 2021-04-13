@@ -2,6 +2,10 @@
 import enum
 import wx
 from wx.lib.splitter import MultiSplitterWindow
+from math import sqrt
+
+def dist(x1, y1, x2, y2):
+    return sqrt(abs(x2-x1)**2 + sqrt(y2-y2)**2)
 
 
 class UIModes(enum.Enum):
@@ -13,21 +17,23 @@ class UIModes(enum.Enum):
 class FieldPanel(wx.Panel):
 
     def __init__(self, parent):
+        self.waypoints = []
         wx.Panel.__init__(self, parent=parent)
         self.ui_mode = UIModes.AddNode
         hbox = wx.BoxSizer(wx.VERTICAL)
-        self.field = wx.Image('field.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
-        self.w = self.field.GetWidth()
-        self.h = self.field.GetHeight()
+        field = wx.Image('field.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
+        self.w = field.GetWidth()
+        self.h = field.GetHeight()
         self.field_bmp = wx.StaticBitmap(parent=self,
                                          id=-1,
-                                         bitmap=self.field,
+                                         bitmap=field,
                                          pos=(0, 0),
                                          size=(self.w, self.h))
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
         hbox.Add(self.field_bmp, 0, wx.EXPAND | wx.ALL)
         self.SetSizer(hbox)
         self.Fit()
+        self._draw_waypoints()
         
     def set_ui_mode(self, new_mode: UIModes):
         self.ui_mode = new_mode
@@ -42,16 +48,32 @@ class FieldPanel(wx.Panel):
         if self.ui_mode == UIModes.MoveNode:
             pass
 
+    def _draw_waypoints(self):
+        field_blank = wx.Image('field.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
+        dc = wx.MemoryDC(field_blank)
+        dc.SetPen(wx.Pen('red', 4))
+        for x, y in self.waypoints:
+            dc.DrawCircle(x, y, 10)
+        del dc
+        self.field_bmp.SetBitmap(field_blank)
+
     def add_node(self, x, y):
         print(f'Add node at {x}, {y}')
-        dc = wx.MemoryDC(self.field)
-        dc.SetPen(wx.Pen('red', 4))
-        dc.DrawCircle(x, y, 10)
-        del dc
-        self.field_bmp.SetBitmap(self.field)
+        self.waypoints.append((x,y))
+        self._draw_waypoints()
 
     def del_node(self, x, y):
         print(f'Del node at {x}, {y}')
+        to_delete = []
+        for wx, wy in self.waypoints:
+            d = dist(x, y, wx, wy)
+            print(f'Distance {d}')
+            if d < 10:
+                to_delete.append((wx, wy))
+        for delnode in to_delete:
+            self.waypoints.remove(delnode)
+
+        self._draw_waypoints()
 
 
 class ControlPanel(wx.Panel):
