@@ -33,7 +33,7 @@ class FieldPanel(wx.Panel):
         wx.Panel.__init__(self, parent=parent)
         self.ui_mode = UIModes.AddNode
         hbox = wx.BoxSizer(wx.VERTICAL)
-        field = wx.Image('field.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
+        field = wx.Image('field_rapid_react.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         self.w = field.GetWidth()
         self.h = field.GetHeight()
         self.field_bmp = wx.StaticBitmap(parent=self,
@@ -89,7 +89,7 @@ class FieldPanel(wx.Panel):
         gc.StrokePath(path)
 
     def _draw_waypoints(self):
-        field_blank = wx.Image('field.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
+        field_blank = wx.Image('field_rapid_react.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
         dc.SetPen(wx.Pen('red', 4))
         for w in self.waypoints:
