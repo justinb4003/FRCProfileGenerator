@@ -42,6 +42,7 @@ class FieldPanel(wx.Panel):
                                          pos=(0, 0),
                                          size=(self.w, self.h))
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
+        self.Bind(wx.EVT_PAINT, self.OnPaint)
         hbox.Add(self.field_bmp, 0, wx.EXPAND | wx.ALL)
         self.SetSizer(hbox)
         self.Fit()
@@ -65,12 +66,52 @@ class FieldPanel(wx.Panel):
         if self.ui_mode == UIModes.SelectNode:
             self.sel_node(x, y)
 
+    def OnPaint(self, evt):
+        print('OnPaint() running')  # But still dosn't do anything
+        dc = wx.PaintDC(self)
+        gc = wx.GraphicsContext.Create(dc)
+        gc.SetPen(wx.RED_PEN)
+        path = gc.CreatePath()
+        path.AddCircle(50.0, 50.0, 50.0)
+        path.MoveToPoint(0.0, 50.0)
+        path.AddLineToPoint(100.0, 50.0)
+        path.MoveToPoint(50.0, 0.0)
+        path.AddLineToPoint(50.0, 100.0)
+        path.CloseSubpath()
+        path.AddRectangle(25.0, 25.0, 50.0, 50.0)
+        gc.StrokePath(path)
+
+        # Draw a Bézier curve
+        gc.SetPen(wx.BLUE_PEN)
+        path = gc.CreatePath()
+        path.MoveToPoint(120.0, 160.0)
+        path.AddCurveToPoint((35, 200), (220, 260), (220, 40))
+        gc.StrokePath(path)
+
     def _draw_waypoints(self):
         field_blank = wx.Image('field.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
         dc.SetPen(wx.Pen('red', 4))
         for w in self.waypoints:
             dc.DrawCircle(w.x, w.y, 10)
+        
+        # Just draw some lines between the waypoints for now.
+        dc.SetPen(wx.Pen('blue', 2))
+        for start, end in zip(self.waypoints, self.waypoints[1:]):
+            dc.DrawLine(start.x, start.y, end.x, end.y)
+
+        if len(self.waypoints) > 2:
+            """
+            K = [(w.x, w.y) for w in self.waypoints]
+            fps = 12
+            vmax = fps * 12    ## inches/sec
+            amax = vmax * 1.0  ## inches/sec/sec (reaches vmax in 1/1th seconds)
+            jmax = amax * 10.0 ## inches/sec/sec (reaches amax in 1/10th seconds)
+            beziers = buildtrajectory(K, fps, vmax, amax, jmax)
+            print(beziers)
+            """
+            pass
+
         del dc
         self.field_bmp.SetBitmap(field_blank)
 
@@ -133,7 +174,10 @@ class ControlPanel(wx.Panel):
         del_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_del)
         sel_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_sel)
         export_profile.Bind(wx.EVT_BUTTON, self.export_profile)
-        self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_x_change)
+        self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
+        self.waypoint_y.Bind(wx.EVT_TEXT, self.on_waypoint_change)
+        self.waypoint_v.Bind(wx.EVT_TEXT, self.on_waypoint_change)
+        self.waypoint_heading.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         hbox = wx.BoxSizer(wx.VERTICAL)
         hbox.Add(add_waypoint, 0, wx.EXPAND | wx.ALL)
         hbox.Add(del_waypoint, 0, wx.EXPAND | wx.ALL)
@@ -169,10 +213,15 @@ class ControlPanel(wx.Panel):
         self.waypoint_heading.SetValue(str(waypoint.heading))
         self.active_waypoint = waypoint
     
-    def on_waypoint_x_change(self, evt):
+    def on_waypoint_change(self, evt):
         newx = int(self.waypoint_x.GetValue())
+        newy = int(self.waypoint_y.GetValue())
+        newv = float(self.waypoint_v.GetValue())
+        newheading = float(self.waypoint_heading.GetValue())
         self.active_waypoint.x = newx
-        print(self.waypoint_x.GetValue())
+        self.active_waypoint.y = newy
+        self.active_waypoint.v = newv
+        self.active_waypoint.heading = newheading
         self.field_panel.redraw()
 
 
