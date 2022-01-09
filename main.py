@@ -3,25 +3,27 @@ import enum
 import wx
 from wx.lib.splitter import MultiSplitterWindow
 from math import sqrt
-from collections import namedtuple
+from recordclass import recordclass
 
 
-Waypoint = namedtuple('Waypoint', ['x', 'y', 'v', 'heading'])
+Waypoint = recordclass('Waypoint', ['x', 'y', 'v', 'heading'])
 
 def dist(x1, y1, x2, y2):
-    return sqrt(abs(x2-x1)**2 + sqrt(y2-y2)**2)
+    return sqrt(abs(x2-x1)**2 + sqrt(abs(y2-y1))**2)
 
 
 class UIModes(enum.Enum):
     AddNode = 1
     DelNode = 2
     MoveNode = 3
+    SelectNode = 4
 
 
 class FieldPanel(wx.Panel):
 
     def __init__(self, parent):
         self.waypoints = []
+        self.control_panel = None
         wx.Panel.__init__(self, parent=parent)
         self.ui_mode = UIModes.AddNode
         hbox = wx.BoxSizer(wx.VERTICAL)
@@ -54,6 +56,8 @@ class FieldPanel(wx.Panel):
             self.del_node(x, y)
         if self.ui_mode == UIModes.MoveNode:
             pass
+        if self.ui_mode == UIModes.SelectNode:
+            self.sel_node(x, y)
 
     def _draw_waypoints(self):
         field_blank = wx.Image('field.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
@@ -64,6 +68,17 @@ class FieldPanel(wx.Panel):
         del dc
         self.field_bmp.SetBitmap(field_blank)
 
+    def _find_closest_waypoint(self, x, y, distance_limit=10):
+        closest_distance = distance_limit + 1
+        closest_waypoint = None
+        for w in self.waypoints:
+            d = dist(x, y, w.x, w.y)
+            print(f'Distance {d}')
+            if d < distance_limit and d < closest_distance:
+                closest_distance = d
+                closest_waypoint = w
+        return closest_waypoint
+
     def add_node(self, x, y):
         print(f'Add node at {x}, {y}')
         w = Waypoint(x=x, y=y, v=10, heading=0)
@@ -72,29 +87,56 @@ class FieldPanel(wx.Panel):
 
     def del_node(self, x, y):
         print(f'Del node at {x}, {y}')
-        to_delete = []
-        for w in self.waypoints:
-            d = dist(x, y, w.x, w.y)
-            print(f'Distance {d}')
-            if d < 10:
-                to_delete.append(w)
-        for delnode in to_delete:
+        delnode = self._find_closest_waypoint(x, y)
+        if delnode is not None:
             self.waypoints.remove(delnode)
 
+        self._draw_waypoints()
+    
+    def sel_node(self, x, y):
+        print(f'Select node at {x}, {y}')
+        selnode = self._find_closest_waypoint(x, y)
+        if selnode is not None:
+            self.control_panel.select_waypoint(selnode)
+        
+    def redraw(self):
         self._draw_waypoints()
 
 
 class ControlPanel(wx.Panel):
-    def __init__(self, field_panel: FieldPanel, parent):
-        self.field_panel = field_panel
+    def __init__(self, parent):
         wx.Panel.__init__(self, parent=parent)
+        self.field_panel = None
+        self.active_waypoint = None
         add_waypoint = wx.Button(self, label='Add Waypoint')
         del_waypoint = wx.Button(self, label='Delete Waypoint')
+        sel_waypoint = wx.Button(self, label='Select Waypoint')
+
+        waypoint_x_lbl = wx.StaticText(self, label='X')
+        self.waypoint_x = wx.TextCtrl(self)
+        waypoint_y_lbl = wx.StaticText(self, label='Y')
+        self.waypoint_y = wx.TextCtrl(self)
+        waypoint_v_lbl = wx.StaticText(self, label='Velocity (fps)')
+        self.waypoint_v = wx.TextCtrl(self)
+        waypoint_heading_lbl = wx.StaticText(self, label='Heading (degrees)')
+        self.waypoint_heading = wx.TextCtrl(self)
+        
         add_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_add)
         del_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_del)
+        sel_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_sel)
+        self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_x_change)
         hbox = wx.BoxSizer(wx.VERTICAL)
         hbox.Add(add_waypoint, 0, wx.EXPAND | wx.ALL)
         hbox.Add(del_waypoint, 0, wx.EXPAND | wx.ALL)
+        hbox.Add(sel_waypoint, 0, wx.EXPAND | wx.ALL)
+        hbox.Add(waypoint_x_lbl, 0, wx.EXPAND | wx.ALL)
+        hbox.Add(self.waypoint_x, 0, wx.EXPAND | wx.ALL)
+        hbox.Add(waypoint_y_lbl, 0, wx.EXPAND | wx.ALL)
+        hbox.Add(self.waypoint_y, 0, wx.EXPAND | wx.ALL)
+        hbox.Add(waypoint_v_lbl, 0, wx.EXPAND | wx.ALL)
+        hbox.Add(self.waypoint_v, 0, wx.EXPAND | wx.ALL)
+        hbox.Add(waypoint_heading_lbl, 0, wx.EXPAND | wx.ALL)
+        hbox.Add(self.waypoint_heading, 0, wx.EXPAND | wx.ALL)
         self.SetSizer(hbox)
         self.Fit()
 
@@ -103,6 +145,22 @@ class ControlPanel(wx.Panel):
 
     def mode_set_del(self, evt):
         self.field_panel.set_ui_mode(UIModes.DelNode)
+    
+    def mode_set_sel(self, evt):
+        self.field_panel.set_ui_mode(UIModes.SelectNode)
+
+    def select_waypoint(self, waypoint: Waypoint):
+        self.waypoint_x.SetValue(str(waypoint.x))
+        self.waypoint_y.SetValue(str(waypoint.y))
+        self.waypoint_v.SetValue(str(waypoint.v))
+        self.waypoint_heading.SetValue(str(waypoint.heading))
+        self.active_waypoint = waypoint
+    
+    def on_waypoint_x_change(self, evt):
+        newx = int(self.waypoint_x.GetValue())
+        self.active_waypoint.x = newx
+        print(self.waypoint_x.GetValue())
+        self.field_panel.redraw()
 
 
 class MainWindow(wx.Frame):
@@ -114,9 +172,10 @@ class MainWindow(wx.Frame):
                           size=(1400, 800))
 
         self.splitter = MultiSplitterWindow(self, style=wx.SP_LIVE_UPDATE)
+        self.control_panel = ControlPanel(self.splitter)
         self.field_panel = FieldPanel(self.splitter)
-        self.control_panel = ControlPanel(self.field_panel,
-                                          self.splitter)
+        self.field_panel.control_panel = self.control_panel
+        self.control_panel.field_panel = self.field_panel
         self.splitter.AppendWindow(self.field_panel,
                                    sashPos=self.field_panel.w)
         self.splitter.AppendWindow(self.control_panel)
