@@ -3,6 +3,10 @@ import enum
 import wx
 from wx.lib.splitter import MultiSplitterWindow
 from math import sqrt
+from collections import namedtuple
+
+
+Waypoint = namedtuple('Waypoint', ['x', 'y', 'v', 'heading'])
 
 def dist(x1, y1, x2, y2):
     return sqrt(abs(x2-x1)**2 + sqrt(y2-y2)**2)
@@ -38,6 +42,9 @@ class FieldPanel(wx.Panel):
     def set_ui_mode(self, new_mode: UIModes):
         self.ui_mode = new_mode
 
+
+    # TODO: Figure out how to use a drag event
+
     def on_field_click(self, evt):
         x, y = evt.GetPosition()
         print(f'Clicky hit at {x},{y}')
@@ -52,24 +59,25 @@ class FieldPanel(wx.Panel):
         field_blank = wx.Image('field.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
         dc.SetPen(wx.Pen('red', 4))
-        for x, y in self.waypoints:
-            dc.DrawCircle(x, y, 10)
+        for w in self.waypoints:
+            dc.DrawCircle(w.x, w.y, 10)
         del dc
         self.field_bmp.SetBitmap(field_blank)
 
     def add_node(self, x, y):
         print(f'Add node at {x}, {y}')
-        self.waypoints.append((x,y))
+        w = Waypoint(x=x, y=y, v=10, heading=0)
+        self.waypoints.append(w)
         self._draw_waypoints()
 
     def del_node(self, x, y):
         print(f'Del node at {x}, {y}')
         to_delete = []
-        for wx, wy in self.waypoints:
-            d = dist(x, y, wx, wy)
+        for w in self.waypoints:
+            d = dist(x, y, w.x, w.y)
             print(f'Distance {d}')
             if d < 10:
-                to_delete.append((wx, wy))
+                to_delete.append(w)
         for delnode in to_delete:
             self.waypoints.remove(delnode)
 
