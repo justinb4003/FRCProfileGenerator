@@ -28,11 +28,20 @@ class UIModes(enum.Enum):
 # A wx Panel that holds the Field drawing portion of the UI
 class FieldPanel(wx.Panel):
     def __init__(self, parent):
+        # This will be a list of 'Waypoint' type recordclass objects
+        # ordered by their position on the path
         self.waypoints = []
+        # We need to hang onto a reference to the control panel's elemnts
+        # because the app needs to send data over to them now and again
+        # likewise the control panel object has a reference to this field panel
         self.control_panel = None
         wx.Panel.__init__(self, parent=parent)
+        # We default the application to the mode where the user is adding
+        # waypoints
         self.ui_mode = UIModes.AddNode
+        # The BoxSizer is a layout manager that arranges the controls in a box
         hbox = wx.BoxSizer(wx.VERTICAL)
+        # Load in the field image
         field = wx.Image('field_rapid_react.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         self.w = field.GetWidth()
         self.h = field.GetHeight()
@@ -41,7 +50,13 @@ class FieldPanel(wx.Panel):
                                          bitmap=field,
                                          pos=(0, 0),
                                          size=(self.w, self.h))
+        # Here any click that happens inside the field area will trigger the
+        # on_field_click function which hands the event.
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
+        # Lets us draw graphics in our own OnPaint method when needed
+        # currently always being drawn behind the field bmp and other
+        # circles and lines.
+        # TODO: Need to fix that.
         self.Bind(wx.EVT_PAINT, self.OnPaint)
         hbox.Add(self.field_bmp, 0, wx.EXPAND | wx.ALL)
         self.SetSizer(hbox)
@@ -51,8 +66,7 @@ class FieldPanel(wx.Panel):
     def set_ui_mode(self, new_mode: UIModes):
         self.ui_mode = new_mode
 
-
-    # TODO: Figure out how to use a drag event
+    # TODO: Figure out how to implement a drag event
 
     def on_field_click(self, evt):
         x, y = evt.GetPosition()
@@ -66,6 +80,8 @@ class FieldPanel(wx.Panel):
         if self.ui_mode == UIModes.SelectNode:
             self.sel_node(x, y)
 
+    # TODO: This is working but only displaying behind everything else, not
+    # on top, where I want it.
     def OnPaint(self, evt):
         print('OnPaint() running')  # But still dosn't do anything
         dc = wx.PaintDC(self)
@@ -115,6 +131,10 @@ class FieldPanel(wx.Panel):
         del dc
         self.field_bmp.SetBitmap(field_blank)
 
+    # When a click on the field occurs we locate the waypoint closest to that
+    # click so we know which one the users wishes to operate on.
+    # The distance_limit threshold sets a max distance the user can be away
+    # from the center of a point before we disregard it.
     def _find_closest_waypoint(self, x, y, distance_limit=10):
         closest_distance = distance_limit + 1
         closest_waypoint = None
@@ -126,12 +146,15 @@ class FieldPanel(wx.Panel):
                 closest_waypoint = w
         return closest_waypoint
 
+    # Adds a new waypoint to the end of the list where the user clicked
     def add_node(self, x, y):
         print(f'Add node at {x}, {y}')
+        # Defaultig velocity and headings for now.
         w = Waypoint(x=x, y=y, v=10, heading=0)
         self.waypoints.append(w)
         self._draw_waypoints()
 
+    # Delete the closest waypoint to the click
     def del_node(self, x, y):
         print(f'Del node at {x}, {y}')
         delnode = self._find_closest_waypoint(x, y)
@@ -140,12 +163,19 @@ class FieldPanel(wx.Panel):
 
         self._draw_waypoints()
     
+    # select the closest waypoint to the click for modification
+    # via the controls in the control panel UI
     def sel_node(self, x, y):
         print(f'Select node at {x}, {y}')
         selnode = self._find_closest_waypoint(x, y)
         if selnode is not None:
             self.control_panel.select_waypoint(selnode)
-        
+
+    # A more 'public' method (lack of an underscore means it's OK to call it)
+    # that redraws the field with all the required decorations. Eventually
+    # the field draw will encompass more than one function so the control
+    # panel should just call this instead of needing to know which internals
+    # all need to be hit together.
     def redraw(self):
         self._draw_waypoints()
 
@@ -156,11 +186,14 @@ class ControlPanel(wx.Panel):
         wx.Panel.__init__(self, parent=parent)
         self.field_panel = None
         self.active_waypoint = None
+
+        # Create button objects. By themselves they do nothing
         add_waypoint = wx.Button(self, label='Add Waypoint')
         del_waypoint = wx.Button(self, label='Delete Waypoint')
         sel_waypoint = wx.Button(self, label='Select Waypoint')
         export_profile = wx.Button(self, label='Export Profile')
 
+        # Much like the buttons we create labels and text editing boxes
         waypoint_x_lbl = wx.StaticText(self, label='X')
         self.waypoint_x = wx.TextCtrl(self)
         waypoint_y_lbl = wx.StaticText(self, label='Y')
@@ -170,14 +203,25 @@ class ControlPanel(wx.Panel):
         waypoint_heading_lbl = wx.StaticText(self, label='Heading (degrees)')
         self.waypoint_heading = wx.TextCtrl(self)
         
+        # Now we 'bind' events from the controls to functions within the
+        # application that can handle them.
+        # Button click events
         add_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_add)
         del_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_del)
         sel_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_sel)
         export_profile.Bind(wx.EVT_BUTTON, self.export_profile)
+
+        # Text change handler; they all go to the same function though.
+        # This modifies the currently selected waypoint with values
+        # from the text edit boxes
         self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_y.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_v.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_heading.Bind(wx.EVT_TEXT, self.on_waypoint_change)
+
+        # Now we pack the elements into a layout element that will size
+        # and position them appropriately. This is what gets them onto the
+        # display finally.
         hbox = wx.BoxSizer(wx.VERTICAL)
         hbox.Add(add_waypoint, 0, wx.EXPAND | wx.ALL)
         hbox.Add(del_waypoint, 0, wx.EXPAND | wx.ALL)
@@ -194,6 +238,7 @@ class ControlPanel(wx.Panel):
         self.SetSizer(hbox)
         self.Fit()
 
+    # TODO: Not complete at all yet.
     def export_profile(self, evt):
         buildit()
 
@@ -243,6 +288,7 @@ class MainWindow(wx.Frame):
         self.splitter.AppendWindow(self.field_panel,
                                    sashPos=self.field_panel.w)
         self.splitter.AppendWindow(self.control_panel)
+        # Window dressings like status and menu bars; not wired to anything
         status_bar = self.CreateStatusBar()
         menubar_main = wx.MenuBar()
         file_menu = wx.Menu()
@@ -608,6 +654,7 @@ def buildit():
     outputprofile(outfile, left, right, heading, commandinsert)
 
 
+# here's how we fire up the wxPython app
 if __name__ == '__main__':
     app = wx.App()
     frame = MainWindow(parent=None, id=-1)
