@@ -32,3 +32,4 @@ pip install -r requirements.txt
 ```
 python main.py
 ```
+![Application screenshot showing Rapid React field in one panel with control elements in another.](https://github.com/justinb4003/FRCProfileGenerator/blob/main/screenshots/screen1.png?raw=true)
