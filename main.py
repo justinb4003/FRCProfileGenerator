@@ -53,11 +53,6 @@ class FieldPanel(wx.Panel):
         # Here any click that happens inside the field area will trigger the
         # on_field_click function which hands the event.
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
-        # Lets us draw graphics in our own OnPaint method when needed
-        # currently always being drawn behind the field bmp and other
-        # circles and lines.
-        # TODO: Need to fix that.
-        self.Bind(wx.EVT_PAINT, self.OnPaint)
         hbox.Add(self.field_bmp, 0, wx.EXPAND | wx.ALL)
         self.SetSizer(hbox)
         self.Fit()
@@ -68,6 +63,7 @@ class FieldPanel(wx.Panel):
 
     # TODO: Figure out how to implement a drag event
 
+    
     def on_field_click(self, evt):
         x, y = evt.GetPosition()
         print(f'Clicky hit at {x},{y}')
@@ -80,29 +76,6 @@ class FieldPanel(wx.Panel):
         if self.ui_mode == UIModes.SelectNode:
             self.sel_node(x, y)
 
-    # TODO: This is working but only displaying behind everything else, not
-    # on top, where I want it.
-    def OnPaint(self, evt):
-        print('OnPaint() running')  # But still dosn't do anything
-        dc = wx.PaintDC(self)
-        gc = wx.GraphicsContext.Create(dc)
-        gc.SetPen(wx.RED_PEN)
-        path = gc.CreatePath()
-        path.AddCircle(50.0, 50.0, 50.0)
-        path.MoveToPoint(0.0, 50.0)
-        path.AddLineToPoint(100.0, 50.0)
-        path.MoveToPoint(50.0, 0.0)
-        path.AddLineToPoint(50.0, 100.0)
-        path.CloseSubpath()
-        path.AddRectangle(25.0, 25.0, 50.0, 50.0)
-        gc.StrokePath(path)
-
-        # Draw a Bézier curve
-        gc.SetPen(wx.BLUE_PEN)
-        path = gc.CreatePath()
-        path.MoveToPoint(120.0, 160.0)
-        path.AddCurveToPoint((35, 200), (220, 260), (220, 40))
-        gc.StrokePath(path)
 
     def _draw_waypoints(self):
         field_blank = wx.Image('field_rapid_react.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
@@ -251,7 +224,8 @@ class ControlPanel(wx.Panel):
     def mode_set_sel(self, evt):
         self.field_panel.set_ui_mode(UIModes.SelectNode)
 
-    def select_waypoint(self, waypoint: Waypoint):
+    # TODO: figure out how to type the Waypoint for linting
+    def select_waypoint(self, waypoint):
         self.waypoint_x.SetValue(str(waypoint.x))
         self.waypoint_y.SetValue(str(waypoint.y))
         self.waypoint_v.SetValue(str(waypoint.v))
