@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import enum
+import json
 import wx
 from wx.lib.splitter import MultiSplitterWindow
 from math import sqrt, atan2, ceil, pi
@@ -16,6 +17,7 @@ Waypoint = recordclass('Waypoint', ['x', 'y', 'v', 'heading'])
 def dist(x1, y1, x2, y2):
     return sqrt(abs(x2-x1)**2 + sqrt(abs(y2-y1))**2)
 
+_field_background_img = 'field_charged_up.png'
 
 # Enumeration that controls what mode or state the UI is in.
 class UIModes(enum.Enum):
@@ -42,7 +44,7 @@ class FieldPanel(wx.Panel):
         # The BoxSizer is a layout manager that arranges the controls in a box
         hbox = wx.BoxSizer(wx.VERTICAL)
         # Load in the field image
-        field = wx.Image('field_rapid_react.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
+        field = wx.Image(_field_background_img, wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         self.w = field.GetWidth()
         self.h = field.GetHeight()
         self.field_bmp = wx.StaticBitmap(parent=self,
@@ -61,11 +63,33 @@ class FieldPanel(wx.Panel):
     def set_ui_mode(self, new_mode: UIModes):
         self.ui_mode = new_mode
 
+    
     # TODO: Figure out how to implement a drag event
 
+
+    def alter_pos_for_field(self, x, y):
+        # 640 is center for x
+        # 300 is center for y
+        x -= 640
+        y -= 300
+        x /= 2
+        y /=2
+        return x, y
+
     
+
+    def alter_pos_for_screen(self, x, y):
+        x *= 2
+        y *= 2
+        x += 640
+        y += 300
+
+        return int(x), int(y)
+
+
     def on_field_click(self, evt):
         x, y = evt.GetPosition()
+        x, y = self.alter_pos_for_field(x, y)
         print(f'Clicky hit at {x},{y}')
         if self.ui_mode == UIModes.AddNode:
             self.add_node(x, y)
@@ -78,17 +102,19 @@ class FieldPanel(wx.Panel):
 
 
     def _draw_waypoints(self):
-        field_blank = wx.Image('field_rapid_react.png', wx.BITMAP_TYPE_ANY).ConvertToBitmap()
+        field_blank = wx.Image(_field_background_img, wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
         dc.SetPen(wx.Pen('red', 4))
         for w in self.waypoints:
-            dc.DrawCircle(w.x, w.y, 10)
+            x, y = self.alter_pos_for_screen(w.x, w.y)
+            dc.DrawCircle(x, y, 10)
         
         # Just draw some lines between the waypoints for now.
         dc.SetPen(wx.Pen('blue', 2))
         for start, end in zip(self.waypoints, self.waypoints[1:]):
-            dc.DrawLine(start.x, start.y, end.x, end.y)
-
+            startx, starty = self.alter_pos_for_screen(start.x, start.y)
+            endx, endy = self.alter_pos_for_screen(end.x, end.y)
+            dc.DrawLine(startx, starty, endx, endy)
         if len(self.waypoints) > 2:
             """
             K = [(w.x, w.y) for w in self.waypoints]
@@ -187,10 +213,15 @@ class ControlPanel(wx.Panel):
         # Text change handler; they all go to the same function though.
         # This modifies the currently selected waypoint with values
         # from the text edit boxes
+        # JJB: And is horking things up horribly! Need to unbind it
+        # before updating values or make it not emit the event somehow
+        # for that.
+        """
         self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_y.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_v.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_heading.Bind(wx.EVT_TEXT, self.on_waypoint_change)
+        """
 
         # Now we pack the elements into a layout element that will size
         # and position them appropriately. This is what gets them onto the
@@ -213,7 +244,7 @@ class ControlPanel(wx.Panel):
 
     # TODO: Not complete at all yet.
     def export_profile(self, evt):
-        buildit()
+        buildit(self.field_panel.waypoints)
 
     def mode_set_add(self, evt):
         self.field_panel.set_ui_mode(UIModes.AddNode)
@@ -233,10 +264,10 @@ class ControlPanel(wx.Panel):
         self.active_waypoint = waypoint
     
     def on_waypoint_change(self, evt):
-        newx = int(self.waypoint_x.GetValue())
-        newy = int(self.waypoint_y.GetValue())
-        newv = float(self.waypoint_v.GetValue())
-        newheading = float(self.waypoint_heading.GetValue())
+        newx = float(self.waypoint_x.GetValue())
+        newy = float(self.waypoint_y.GetValue())
+        newv = float(self.waypoint_v.GetValue() or 10)
+        newheading = float(self.waypoint_heading.GetValue() or 0)
         self.active_waypoint.x = newx
         self.active_waypoint.y = newy
         self.active_waypoint.v = newv
@@ -252,7 +283,7 @@ class MainWindow(wx.Frame):
                           parent,
                           id,
                           'Profile Generation',
-                          size=(1400, 800))
+                          size=(1460, 800))
 
         self.splitter = MultiSplitterWindow(self, style=wx.SP_LIVE_UPDATE)
         self.control_panel = ControlPanel(self.splitter)
@@ -597,35 +628,14 @@ def outputprofile(filename, left, right, heading, commandinsert):
     """
     pass
 
-# TODO: Uh, actually tie this into real data from the program.
-def buildit():
-    ## physical units on the field
-    fps = 12.0 ## for power up
-    vmax = fps * 12    ## inches/sec
-    amax = vmax * 1.0  ## inches/sec/sec (reaches vmax in 1/1th seconds)
-    jmax = amax * 10.0 ## inches/sec/sec (reaches amax in 1/10th seconds)
+def buildit(waypoints):
+    outpoints = []
+    for w in waypoints:
+        outpoints.append(w._asdict())
+    print(
+        json.dumps(outpoints, indent=4)
+    )
 
-    ## units per cycle
-    ##   time measured in cycles from this point
-    deltat = 0.01   ## 10 ms/cycle
-    vmax *= deltat
-    amax *= deltat**2
-    jmax *= deltat**3
-
-    initHeading = 0
-
-    K = []
-    commands = []
-    emptycmd = " "
-    commandinsert = []
-    velocities = []
-    wheelbase = 24
-    beziers = buildtrajectory(K, fps, vmax, amax, jmax)
-    left, right, heading = buildprofile(beziers, commands, velocities, wheelbase, fps, vmax, amax, jmax)
-    left[-1][1] = 0.0
-    right[-1][1] = 0.0
-    outfile = None
-    outputprofile(outfile, left, right, heading, commandinsert)
 
 
 # here's how we fire up the wxPython app
