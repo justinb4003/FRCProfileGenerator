@@ -120,6 +120,7 @@ class FieldPanel(wx.Panel):
         self.ui_mode = new_mode
 
     def alter_pos_for_field(self, x, y):
+        # TODO: Make this linear algebra
         # 640 is center for x
         # 300 is center for y
         x -= 640
@@ -129,6 +130,7 @@ class FieldPanel(wx.Panel):
         return x, y
 
     def alter_pos_for_screen(self, x, y):
+        # TODO: Make this linear algebra
         x *= 2
         y *= 2
         x += 640
@@ -375,18 +377,10 @@ class ControlPanel(wx.Panel):
         show_control_points.Bind(wx.EVT_CHECKBOX, self.toggle_control_points)
         mirror_paths.Bind(wx.EVT_CHECKBOX, self.toggle_mirror_paths)
 
-        # Text change handler; they all go to the same function though.
-        # This modifies the currently selected waypoint with values
-        # from the text edit boxes
-        # JJB: And is horking things up horribly! Need to unbind it
-        # before updating values or make it not emit the event somehow
-        # for that.
-        """
         self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_y.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_v.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_heading.Bind(wx.EVT_TEXT, self.on_waypoint_change)
-        """
 
         # Now we pack the elements into a layout element that will size
         # and position them appropriately. This is what gets them onto the
@@ -434,27 +428,45 @@ class ControlPanel(wx.Panel):
 
     def select_waypoint(self, waypoint: Waypoint):
         if waypoint is not None:
-            self.waypoint_x.SetValue(str(waypoint.x))
-            self.waypoint_y.SetValue(str(waypoint.y))
-            self.waypoint_v.SetValue(str(waypoint.v))
-            self.waypoint_heading.SetValue(str(waypoint.heading))
+            self.waypoint_x.ChangeValue(str(waypoint.x))
+            self.waypoint_y.ChangeValue(str(waypoint.y))
+            self.waypoint_v.ChangeValue(str(waypoint.v))
+            self.waypoint_heading.ChangeValue(str(waypoint.heading))
         else:
-            self.waypoint_x.SetValue('')
-            self.waypoint_y.SetValue('')
-            self.waypoint_v.SetValue('')
-            self.waypoint_heading.SetValue('')
+            self.waypoint_x.ChangeValue('')
+            self.waypoint_y.ChangeValue('')
+            self.waypoint_v.ChangeValue('')
+            self.waypoint_heading.ChangeValue('')
 
         self.active_waypoint = waypoint
 
     def on_waypoint_change(self, evt):
-        newx = float(self.waypoint_x.GetValue())
-        newy = float(self.waypoint_y.GetValue())
-        newv = float(self.waypoint_v.GetValue() or 10)
-        newheading = float(self.waypoint_heading.GetValue() or 0)
-        self.active_waypoint.x = newx
-        self.active_waypoint.y = newy
-        self.active_waypoint.v = newv
-        self.active_waypoint.heading = newheading
+        if self.active_waypoint is None:
+            return
+        try:
+            newx = float(self.waypoint_x.GetValue())
+            self.active_waypoint.x = newx
+        except ValueError:
+            print('Using old value of x, input is invalid')
+
+        try:
+            newy = float(self.waypoint_y.GetValue())
+            self.active_waypoint.y = newy
+        except ValueError:
+            print('Using old value of y, input is invalid')
+
+        try:
+            newv = float(self.waypoint_v.GetValue() or 10)
+            self.active_waypoint.v = newv
+        except ValueError:
+            print('Using old value of v, input is invalid')
+
+        try:
+            newheading = float(self.waypoint_heading.GetValue() or 0)
+            self.active_waypoint.heading = newheading
+        except ValueError:
+            print('Using old value of heading, input is invalid')
+
         self.field_panel.redraw()
 
 
