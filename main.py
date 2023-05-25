@@ -108,7 +108,7 @@ class FieldPanel(wx.Panel):
             event.Skip()
             return
         event.Skip()
-        print("Dragging position", x, y)
+        # print("Dragging position", x, y)
         if self._selected_node is not None:
             fieldx, fieldy = self.alter_pos_for_field(x, y)
             self._selected_node.x = fieldx
@@ -142,7 +142,7 @@ class FieldPanel(wx.Panel):
     def on_field_click(self, evt):
         x, y = evt.GetPosition()
         x, y = self.alter_pos_for_field(x, y)
-        print(f'Clicky hit at {x},{y}')
+        # print(f'Clicky hit at {x},{y}')
         selnode = self._find_closest_waypoint(x, y)
         if selnode is None:
             self.add_node(x, y)
@@ -156,7 +156,7 @@ class FieldPanel(wx.Panel):
         dc.SetTextForeground('white')
         dc.SetTextBackground('black')
         font = dc.GetFont()
-        font.SetPointSize(16)
+        font.SetPointSize(14)
         dc.SetFont(font)
         dc.DrawText(str(idx), x, y)
 
@@ -288,7 +288,7 @@ class FieldPanel(wx.Panel):
         closest_waypoint = None
         for w in self.waypoints:
             d = dist(x, y, w.x, w.y)
-            print(f'Distance {d}')
+            # print(f'Distance {d}')
             if d < distance_limit and d < closest_distance:
                 closest_distance = d
                 closest_waypoint = w
@@ -300,12 +300,13 @@ class FieldPanel(wx.Panel):
         # Defaultig velocity and headings for now.
         w = Waypoint(x=x, y=y, v=10, heading=0)
         self.waypoints.append(w)
-        outdata = [x._asdict() for x in self.waypoints]
-        print('dumpping', outdata)
-        print(
-            json.dumps(outdata,
-                       sort_keys=True, indent=4)
-        )
+        if False:
+            outdata = [x._asdict() for x in self.waypoints]
+            print('dumpping', outdata)
+            print(
+                json.dumps(outdata,
+                           sort_keys=True, indent=4)
+            )
         self._selected_node = w
         self.control_panel.select_waypoint(w)
         self._draw_waypoints()
@@ -350,9 +351,6 @@ class ControlPanel(wx.Panel):
         self.mirror_paths = False
 
         # Create button objects. By themselves they do nothing
-        # add_waypoint = wx.Button(self, label='Add Waypoint')
-        # del_waypoint = wx.Button(self, label='Delete Waypoint')
-        # sel_waypoint = wx.Button(self, label='Select Waypoint')
         export_profile = wx.Button(self, label='Export Profile')
         show_control_points = wx.CheckBox(self, label='Show Control Points')
         mirror_paths = wx.CheckBox(self, label='Mirror Paths')
@@ -372,11 +370,7 @@ class ControlPanel(wx.Panel):
         # Now we 'bind' events from the controls to functions within the
         # application that can handle them.
         # Button click events
-        # add_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_add)
-        # del_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_del)
-        # sel_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_sel)
         export_profile.Bind(wx.EVT_BUTTON, self.export_profile)
-        # TODO: ctlpoint checkbox
         show_control_points.Bind(wx.EVT_CHECKBOX, self.toggle_control_points)
         mirror_paths.Bind(wx.EVT_CHECKBOX, self.toggle_mirror_paths)
 
@@ -397,9 +391,6 @@ class ControlPanel(wx.Panel):
         # and position them appropriately. This is what gets them onto the
         # display finally.
         hbox = wx.BoxSizer(wx.VERTICAL)
-        # hbox.Add(add_waypoint, 0, wx.EXPAND | wx.ALL)
-        # hbox.Add(del_waypoint, 0, wx.EXPAND | wx.ALL)
-        # hbox.Add(sel_waypoint, 0, wx.EXPAND | wx.ALL)
         hbox.Add(waypoint_x_lbl, 0, wx.EXPAND | wx.ALL)
         hbox.Add(self.waypoint_x, 0, wx.EXPAND | wx.ALL)
         hbox.Add(waypoint_y_lbl, 0, wx.EXPAND | wx.ALL)
