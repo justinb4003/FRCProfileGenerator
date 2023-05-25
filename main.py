@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import wx
-import enum
 import code
 import json
 import numpy as np
-from wx.lib.splitter import MultiSplitterWindow
+
 from math import sqrt
 from recordclass import recordclass
+from wx.lib.splitter import MultiSplitterWindow
 
 # Using flake8 for linting
 
@@ -72,17 +72,10 @@ _field_background_img = 'field_charged_up.png'
 _field_offset = 52
 
 
-# Enumeration that controls what mode or state the UI is in.
-class UIModes(enum.Enum):
-    AddNode = 1
-    DelNode = 2
-    MoveNode = 3
-    SelectNode = 4
-
-
 # A wx Panel that holds the Field drawing portion of the UI
 class FieldPanel(wx.Panel):
     _selected_node = None
+    _highlight_node = None
 
     def __init__(self, parent):
         # This will be a list of 'Waypoint' type recordclass objects
@@ -93,9 +86,6 @@ class FieldPanel(wx.Panel):
         # likewise the control panel object has a reference to this field panel
         self.control_panel = None
         wx.Panel.__init__(self, parent=parent)
-        # We default the application to the mode where the user is adding
-        # waypoints
-        self.ui_mode = UIModes.AddNode
         # The BoxSizer is a layout manager that arranges the controls in a box
         hbox = wx.BoxSizer(wx.VERTICAL)
         # Load in the field image
@@ -120,20 +110,21 @@ class FieldPanel(wx.Panel):
 
     def on_mouse_drag(self, event):
         x, y = event.GetPosition()
+        fieldx, fieldy = self.alter_pos_for_field(x, y)
         if not event.Dragging():
             event.Skip()
+            last_highlight = self._highlight_node
+            self._highlight_node = self._find_closest_waypoint(fieldx, fieldy)
+            if last_highlight != self._highlight_node:
+                self._draw_waypoints()
             return
         event.Skip()
         # print("Dragging position", x, y)
         if self._selected_node is not None:
-            fieldx, fieldy = self.alter_pos_for_field(x, y)
             self._selected_node.x = fieldx
             self._selected_node.y = fieldy
             self.control_panel.select_waypoint(self._selected_node)
             self._draw_waypoints()
-
-    def set_ui_mode(self, new_mode: UIModes):
-        self.ui_mode = new_mode
 
     def alter_pos_for_field(self, x, y):
         # TODO: Make this linear algebra
@@ -181,7 +172,11 @@ class FieldPanel(wx.Panel):
 
     def _draw_rr_waypoint(self, dc, w, idx):
         x, y = self.alter_pos_for_screen(w.x, w.y)
-        bgcolor = 'black' if self._selected_node != w else 'orange'
+        bgcolor = 'black'
+        if self._highlight_node == w:
+            bgcolor = 'white'
+        if self._selected_node == w:
+            bgcolor = 'orange'
         self._draw_waypoint(dc, x, y, idx, 'red', bgcolor)
 
     def _draw_rl_waypoint(self, dc, w, idx):
@@ -236,13 +231,14 @@ class FieldPanel(wx.Panel):
         field_blank = wx.Image(_field_background_img,
                                wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
-        dc.SetPen(wx.Pen('magenta', 2))
-        sx, sy = self.alter_pos_for_screen(-100, _field_offset)
-        ex, ey = self.alter_pos_for_screen(100, _field_offset)
-        dc.DrawLine(sx, sy, ex, ey)
-        sx, sy = self.alter_pos_for_screen(0, -100)
-        ex, ey = self.alter_pos_for_screen(0, 100)
-        dc.DrawLine(sx, sy, ex, ey)
+        if self.control_panel and self.control_panel.draw_field_center:
+            dc.SetPen(wx.Pen('magenta', 2))
+            sx, sy = self.alter_pos_for_screen(-100, _field_offset)
+            ex, ey = self.alter_pos_for_screen(100, _field_offset)
+            dc.DrawLine(sx, sy, ex, ey)
+            sx, sy = self.alter_pos_for_screen(0, -100)
+            ex, ey = self.alter_pos_for_screen(0, 100)
+            dc.DrawLine(sx, sy, ex, ey)
         for idx, w in enumerate(self.waypoints):
             self._draw_rr_waypoint(dc, w, idx)
             if self.control_panel.mirror_paths:
@@ -302,12 +298,11 @@ class FieldPanel(wx.Panel):
     # click so we know which one the users wishes to operate on.
     # The distance_limit threshold sets a max distance the user can be away
     # from the center of a point before we disregard it.
-    def _find_closest_waypoint(self, x, y, distance_limit=10):
+    def _find_closest_waypoint(self, x, y, distance_limit=4):
         closest_distance = distance_limit + 1
         closest_waypoint = None
         for w in self.waypoints:
             d = dist(x, y, w.x, w.y)
-            # print(f'Distance {d}')
             if d < distance_limit and d < closest_distance:
                 closest_distance = d
                 closest_waypoint = w
@@ -330,7 +325,13 @@ class FieldPanel(wx.Panel):
         self.control_panel.select_waypoint(w)
         self._draw_waypoints()
 
+    def find_closest_spline(self, screenx, screeny, max_distance=20):
+        # Eh, gonna think about this one.
+        return None
+
     # Delete the closest waypoint to the click
+    # Or if we're not on a waypoint add one here between
+    # the start and end points of this spline
     def del_node(self, x, y):
         print(f'Del node at {x}, {y}')
         self._selected_node = None
@@ -338,7 +339,15 @@ class FieldPanel(wx.Panel):
         delnode = self._find_closest_waypoint(x, y)
         if delnode is not None:
             self.waypoints.remove(delnode)
-
+        else:
+            # Add waypoint between endpoints of closest spline
+            # TODO: Figure out how to find closest spline
+            spline_start = self.find_closest_spline(x, y)
+            if spline_start is not None:
+                start_index = self.waypoints.index(spline_start)
+                fieldx, fieldy = self.alter_pos_for_field(x, y)
+                w = Waypoint(fieldx, fieldy, 10, 0)
+                self.waypoints.insert(start_index+1, w)
         self._draw_waypoints()
 
     # select the closest waypoint to the click for modification
@@ -366,14 +375,18 @@ class ControlPanel(wx.Panel):
         wx.Panel.__init__(self, parent=parent)
         self.field_panel = None
         self.active_waypoint = None
+        self.highlight_waypoint = None
         self.show_control_points = False
+        self.draw_field_center = True
         self.mirror_paths = False
 
         # Create button objects. By themselves they do nothing
         export_profile = wx.Button(self, label='Export Profile')
+        draw_field_center = wx.CheckBox(self, label='Draw Field Center')
         show_control_points = wx.CheckBox(self, label='Show Control Points')
         mirror_paths = wx.CheckBox(self, label='Mirror Paths')
         show_control_points.SetValue(self.show_control_points)
+        draw_field_center.SetValue(self.draw_field_center)
         mirror_paths.SetValue(self.mirror_paths)
 
         # Much like the buttons we create labels and text editing boxes
@@ -390,6 +403,7 @@ class ControlPanel(wx.Panel):
         # application that can handle them.
         # Button click events
         export_profile.Bind(wx.EVT_BUTTON, self.export_profile)
+        draw_field_center.Bind(wx.EVT_CHECKBOX, self.toggle_draw_field_center)
         show_control_points.Bind(wx.EVT_CHECKBOX, self.toggle_control_points)
         mirror_paths.Bind(wx.EVT_CHECKBOX, self.toggle_mirror_paths)
 
@@ -412,6 +426,7 @@ class ControlPanel(wx.Panel):
         hbox.Add(waypoint_heading_lbl, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(self.waypoint_heading, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.AddSpacer(8)
+        hbox.Add(draw_field_center, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(show_control_points, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(mirror_paths, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.AddSpacer(8)
@@ -422,20 +437,16 @@ class ControlPanel(wx.Panel):
     # TODO: Not complete at all yet.
     def export_profile(self, evt):
         buildit(self.field_panel.waypoints)
-
-    def mode_set_add(self, evt):
-        self._selected_node = None
-        self.field_panel.set_ui_mode(UIModes.AddNode)
-
-    def mode_set_del(self, evt):
-        self._selected_node = None
-        self.field_panel.set_ui_mode(UIModes.DelNode)
-
-    def mode_set_sel(self, evt):
-        self.field_panel.set_ui_mode(UIModes.SelectNode)
+        wx.MessageDialog(
+            parent=None, message='Data exported to clipoboard'
+        ).ShowModal()
 
     def toggle_control_points(self, evt):
         self.show_control_points = not self.show_control_points
+        self.field_panel._draw_waypoints()
+
+    def toggle_draw_field_center(self, evt):
+        self.draw_field_center = not self.draw_field_center
         self.field_panel._draw_waypoints()
 
     def toggle_mirror_paths(self, evt):
@@ -527,12 +538,11 @@ class MainWindow(wx.Frame):
 
 
 def buildit(waypoints):
-    outpoints = []
-    for w in waypoints:
-        outpoints.append(w._asdict())
-    print(
-        json.dumps(outpoints, indent=4)
-    )
+    outdata = [x._asdict() for x in waypoints]
+    json_str = json.dumps(outdata, sort_keys=True, indent=4)
+    if wx.TheClipboard.Open():
+        wx.TheClipboard.SetData(wx.TextDataObject(json_str))
+        wx.TheClipboard.Close()
 
 
 waypoint_test_json = """
@@ -545,6 +555,8 @@ waypoint_test_json = """
 
 # here's how we fire up the wxPython app
 if __name__ == '__main__':
+    # Load up some data for testing so I don't click-click-click each time I
+    # start
     objs = json.loads(waypoint_test_json)
     waypoints = []
     for o in objs:
@@ -553,5 +565,6 @@ if __name__ == '__main__':
     app = wx.App()
     frame = MainWindow(parent=None, id=-1)
     frame.Show()
+    # Use the testing data we loaded.
     frame.set_waypoints(waypoints)
     app.MainLoop()
