@@ -95,6 +95,7 @@ class FieldPanel(wx.Panel):
         # Here any click that happens inside the field area will trigger the
         # on_field_click function which hands the event.
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
+        self.field_bmp.Bind(wx.EVT_RIGHT_DOWN, self.on_field_click_right)
         self.field_bmp.Bind(wx.EVT_MOTION, self.on_mouse_drag)
         hbox.Add(self.field_bmp, 0, wx.EXPAND | wx.ALL)
         self.SetSizer(hbox)
@@ -133,17 +134,19 @@ class FieldPanel(wx.Panel):
         y += 300
         return int(x), int(y)
 
+    def on_field_click_right(self, evt):
+        x, y = evt.GetPosition()
+        x, y = self.alter_pos_for_field(x, y)
+        self.del_node(x, y)
+
     def on_field_click(self, evt):
         x, y = evt.GetPosition()
         x, y = self.alter_pos_for_field(x, y)
         print(f'Clicky hit at {x},{y}')
-        if self.ui_mode == UIModes.AddNode:
+        selnode = self._find_closest_waypoint(x, y)
+        if selnode is None:
             self.add_node(x, y)
-        if self.ui_mode == UIModes.DelNode:
-            self.del_node(x, y)
-        if self.ui_mode == UIModes.MoveNode:
-            pass
-        if self.ui_mode == UIModes.SelectNode:
+        else:
             self.sel_node(x, y)
 
     def _draw_waypoint(self, dc, x, y, idx, marker_fg, marker_bg):
@@ -223,17 +226,19 @@ class FieldPanel(wx.Panel):
         dc.DrawLine(sx, sy, ex, ey)
         for idx, w in enumerate(self.waypoints):
             self._draw_rr_waypoint(dc, w, idx)
-            self._draw_rl_waypoint(dc, w, idx)
-            self._draw_bl_waypoint(dc, w, idx)
-            self._draw_br_waypoint(dc, w, idx)
+            if self.control_panel.mirror_paths:
+                self._draw_rl_waypoint(dc, w, idx)
+                self._draw_bl_waypoint(dc, w, idx)
+                self._draw_br_waypoint(dc, w, idx)
 
         # Just draw some lines between the waypoints for now.
         if len(self.waypoints) <= -1:
             for start, end in zip(self.waypoints, self.waypoints[1:]):
                 self._draw_rr_line(dc, start, end)
-                self._draw_rl_line(dc, start, end)
-                self._draw_bl_line(dc, start, end)
-                self._draw_br_line(dc, start, end)
+                if self.control_panel.mirror_paths:
+                    self._draw_rl_line(dc, start, end)
+                    self._draw_bl_line(dc, start, end)
+                    self._draw_br_line(dc, start, end)
 
         if len(self.waypoints) > 2:
             sw = self._get_screen_waypoints()
@@ -255,9 +260,10 @@ class FieldPanel(wx.Panel):
                 ctl2.y = int(ctl2P[1])
                 endP = wx.Point2D(end[0], end[1])
                 # code.interact(local=locals())
-                gc.SetPen(wx.Pen('blue', 2))
-                dc.DrawCircle(int(ctl1.x), int(ctl1.y), 2)
-                dc.DrawCircle(int(ctl2.x), int(ctl2.y), 2)
+                if self.control_panel.show_control_points:
+                    gc.SetPen(wx.Pen('blue', 2))
+                    dc.DrawCircle(int(ctl1.x), int(ctl1.y), 2)
+                    dc.DrawCircle(int(ctl2.x), int(ctl2.y), 2)
                 path.AddCurveToPoint(ctl1, ctl2, endP)
             gc.SetPen(wx.Pen('red', 2))
             gc.StrokePath(path)
@@ -340,12 +346,18 @@ class ControlPanel(wx.Panel):
         wx.Panel.__init__(self, parent=parent)
         self.field_panel = None
         self.active_waypoint = None
+        self.show_control_points = False
+        self.mirror_paths = False
 
         # Create button objects. By themselves they do nothing
-        add_waypoint = wx.Button(self, label='Add Waypoint')
-        del_waypoint = wx.Button(self, label='Delete Waypoint')
-        sel_waypoint = wx.Button(self, label='Select Waypoint')
+        # add_waypoint = wx.Button(self, label='Add Waypoint')
+        # del_waypoint = wx.Button(self, label='Delete Waypoint')
+        # sel_waypoint = wx.Button(self, label='Select Waypoint')
         export_profile = wx.Button(self, label='Export Profile')
+        show_control_points = wx.CheckBox(self, label='Show Control Points')
+        mirror_paths = wx.CheckBox(self, label='Mirror Paths')
+        show_control_points.SetValue(self.show_control_points)
+        mirror_paths.SetValue(self.mirror_paths)
 
         # Much like the buttons we create labels and text editing boxes
         waypoint_x_lbl = wx.StaticText(self, label='X')
@@ -360,10 +372,13 @@ class ControlPanel(wx.Panel):
         # Now we 'bind' events from the controls to functions within the
         # application that can handle them.
         # Button click events
-        add_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_add)
-        del_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_del)
-        sel_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_sel)
+        # add_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_add)
+        # del_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_del)
+        # sel_waypoint.Bind(wx.EVT_BUTTON, self.mode_set_sel)
         export_profile.Bind(wx.EVT_BUTTON, self.export_profile)
+        # TODO: ctlpoint checkbox
+        show_control_points.Bind(wx.EVT_CHECKBOX, self.toggle_control_points)
+        mirror_paths.Bind(wx.EVT_CHECKBOX, self.toggle_mirror_paths)
 
         # Text change handler; they all go to the same function though.
         # This modifies the currently selected waypoint with values
@@ -382,9 +397,9 @@ class ControlPanel(wx.Panel):
         # and position them appropriately. This is what gets them onto the
         # display finally.
         hbox = wx.BoxSizer(wx.VERTICAL)
-        hbox.Add(add_waypoint, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(del_waypoint, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(sel_waypoint, 0, wx.EXPAND | wx.ALL)
+        # hbox.Add(add_waypoint, 0, wx.EXPAND | wx.ALL)
+        # hbox.Add(del_waypoint, 0, wx.EXPAND | wx.ALL)
+        # hbox.Add(sel_waypoint, 0, wx.EXPAND | wx.ALL)
         hbox.Add(waypoint_x_lbl, 0, wx.EXPAND | wx.ALL)
         hbox.Add(self.waypoint_x, 0, wx.EXPAND | wx.ALL)
         hbox.Add(waypoint_y_lbl, 0, wx.EXPAND | wx.ALL)
@@ -394,6 +409,8 @@ class ControlPanel(wx.Panel):
         hbox.Add(waypoint_heading_lbl, 0, wx.EXPAND | wx.ALL)
         hbox.Add(self.waypoint_heading, 0, wx.EXPAND | wx.ALL)
         hbox.Add(export_profile, 0, wx.EXPAND | wx.ALL)
+        hbox.Add(show_control_points, 0, wx.EXPAND | wx.ALL)
+        hbox.Add(mirror_paths, 0, wx.EXPAND | wx.ALL)
         self.SetSizer(hbox)
         self.Fit()
 
@@ -411,6 +428,14 @@ class ControlPanel(wx.Panel):
 
     def mode_set_sel(self, evt):
         self.field_panel.set_ui_mode(UIModes.SelectNode)
+
+    def toggle_control_points(self, evt):
+        self.show_control_points = not self.show_control_points
+        self.field_panel._draw_waypoints()
+
+    def toggle_mirror_paths(self, evt):
+        self.mirror_paths = not self.mirror_paths
+        self.field_panel._draw_waypoints()
 
     def select_waypoint(self, waypoint: Waypoint):
         if waypoint is not None:
