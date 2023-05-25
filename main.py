@@ -25,17 +25,30 @@ def dist(x1, y1, x2, y2):
 
 # find the a & b points
 def get_bezier_coef(points):
+    show_la = False
     # since the formulas work given that we have n+1 points
     # then n must be this:
     n = len(points) - 1
 
     # build coefficents matrix
     C = 4 * np.identity(n)
+    if show_la:
+        print('Initial C')
+        print(C)
     np.fill_diagonal(C[1:], 1)
+    if show_la:
+        print('Diag 1')
+        print(C)
     np.fill_diagonal(C[:, 1:], 1)
+    if show_la:
+        print('Diag 2')
+        print(C)
     C[0, 0] = 2
     C[n - 1, n - 1] = 7
     C[n - 1, n - 2] = 2
+    if show_la:
+        print('Constants from derivs')
+        print(C)
 
     # build points vector
     P = [2 * (2 * points[i] + points[i + 1]) for i in range(n)]
@@ -43,6 +56,9 @@ def get_bezier_coef(points):
     P[n - 1] = 8 * points[n - 1] + points[n]
 
     # solve system, find a & b
+    if show_la:
+        print('Point Vector')
+        print(P)
     A = np.linalg.solve(C, P)
     B = [0] * n
     for i in range(n - 1):
