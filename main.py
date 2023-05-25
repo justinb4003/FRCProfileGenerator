@@ -113,6 +113,7 @@ class FieldPanel(wx.Panel):
             fieldx, fieldy = self.alter_pos_for_field(x, y)
             self._selected_node.x = fieldx
             self._selected_node.y = fieldy
+            self.control_panel.select_waypoint(self._selected_node)
             self._draw_waypoints()
 
     def set_ui_mode(self, new_mode: UIModes):
@@ -391,17 +392,20 @@ class ControlPanel(wx.Panel):
         # and position them appropriately. This is what gets them onto the
         # display finally.
         hbox = wx.BoxSizer(wx.VERTICAL)
-        hbox.Add(waypoint_x_lbl, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(self.waypoint_x, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(waypoint_y_lbl, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(self.waypoint_y, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(waypoint_v_lbl, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(self.waypoint_v, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(waypoint_heading_lbl, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(self.waypoint_heading, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(export_profile, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(show_control_points, 0, wx.EXPAND | wx.ALL)
-        hbox.Add(mirror_paths, 0, wx.EXPAND | wx.ALL)
+        border = 5
+        hbox.Add(waypoint_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(self.waypoint_x, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(waypoint_y_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(self.waypoint_y, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(waypoint_v_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(self.waypoint_v, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(waypoint_heading_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(self.waypoint_heading, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.AddSpacer(8)
+        hbox.Add(show_control_points, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(mirror_paths, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.AddSpacer(8)
+        hbox.Add(export_profile, 0, wx.EXPAND | wx.ALL, border=border)
         self.SetSizer(hbox)
         self.Fit()
 
