@@ -17,10 +17,30 @@ from wx.lib.splitter import MultiSplitterWindow
 Waypoint = recordclass('Waypoint', ['x', 'y', 'v', 'heading'])
 
 
+class Transformation(dict):
+    def __init__(self, name, matrix):
+        self.name = name
+        self.matrix = matrix
+
+
+transformations = {}
+
+
 # Made our own distance function instead of using Python's built in
 # math.dist because I didn't know it existed.
 def dist(x1, y1, x2, y2):
     return sqrt(abs(x2-x1)**2 + sqrt(abs(y2-y1))**2)
+
+
+def triangle_height(way1, way2, way3):
+    a = dist(way1.x, way1.y, way2.x, way2.y)
+    b = dist(way2.x, way2.y, way3.x, way3.y)
+    c = dist(way3.x, way3.y, way1.x, way1.y)
+
+    s = (a + b + c) / 2
+    A = sqrt(s * (s - a) * (s - b) * (s - c))
+    h = 2*A / a
+    return h
 
 
 # find the a & b points
@@ -151,13 +171,13 @@ class FieldPanel(wx.Panel):
 
     def on_field_click(self, evt):
         x, y = evt.GetPosition()
-        x, y = self.alter_pos_for_field(x, y)
+        fieldx, fieldy = self.alter_pos_for_field(x, y)
         # print(f'Clicky hit at {x},{y}')
-        selnode = self._find_closest_waypoint(x, y)
+        selnode = self._find_closest_waypoint(fieldx, fieldy)
         if selnode is None:
-            self.add_node(x, y)
+            self.add_node(fieldx, fieldy)
         else:
-            self.sel_node(x, y)
+            self.sel_node(fieldx, fieldy)
 
     def _draw_waypoint(self, dc, x, y, idx, marker_fg, marker_bg):
         dc.SetBrush(wx.Brush(marker_bg))
@@ -309,20 +329,48 @@ class FieldPanel(wx.Panel):
         return closest_waypoint
 
     # Adds a new waypoint to the end of the list where the user clicked
-    def add_node(self, x, y):
-        print(f'Add node at {x}, {y}')
-        # Defaultig velocity and headings for now.
-        w = Waypoint(x=x, y=y, v=10, heading=0)
-        self.waypoints.append(w)
+    def add_node(self, fieldx, fieldy):
+        print(f'Add node at {fieldx}, {fieldy}')
+        # Defaulting velocity and headings for now.
+        new_waypoint = Waypoint(x=fieldx, y=fieldy, v=10, heading=0)
+
+        # Check to see if we need to insert it between two
+        # Poor implementation for now
+
+        # Find two nodes that makes the shortest triangle
+        shortest_combo = (None, None)
+        shortest_height = 100000
+        for w1 in self.waypoints:
+            for w2 in self.waypoints:
+                if w1 == w2:
+                    continue
+                w1_idx = self.waypoints.index(w1)
+                w2_idx = self.waypoints.index(w2)
+                if abs(w1_idx - w2_idx) > 1:
+                    continue
+                h = triangle_height(w1, w2, new_waypoint)
+                if h < shortest_height:
+                    shortest_height = h
+                    shortest_combo = (w1, w2)
+        print('Shortest height', shortest_height)
+        print('Shortest combo', shortest_combo)
+        print(self.waypoints.index(shortest_combo[0]),
+              self.waypoints.index(shortest_combo[1]))
+        if shortest_height < 4:
+            idx = max(self.waypoints.index(shortest_combo[0]),
+                      self.waypoints.index(shortest_combo[1]))
+            self.waypoints.insert(idx, new_waypoint)
+        else:
+            self.waypoints.append(new_waypoint)
         if False:
-            outdata = [x._asdict() for x in self.waypoints]
+            outdata = [fieldx._asdict() for fieldx in self.waypoints]
             print('dumpping', outdata)
             print(
                 json.dumps(outdata,
                            sort_keys=True, indent=4)
             )
-        self._selected_node = w
-        self.control_panel.select_waypoint(w)
+        self._selected_node = new_waypoint
+        self.control_panel.select_waypoint(new_waypoint)
         self._draw_waypoints()
 
     def find_closest_spline(self, screenx, screeny, max_distance=20):
@@ -381,13 +429,14 @@ class ControlPanel(wx.Panel):
         self.mirror_paths = False
 
         # Create button objects. By themselves they do nothing
-        export_profile = wx.Button(self, label='Export Profile')
-        draw_field_center = wx.CheckBox(self, label='Draw Field Center')
-        show_control_points = wx.CheckBox(self, label='Show Control Points')
-        mirror_paths = wx.CheckBox(self, label='Mirror Paths')
-        show_control_points.SetValue(self.show_control_points)
-        draw_field_center.SetValue(self.draw_field_center)
-        mirror_paths.SetValue(self.mirror_paths)
+        export_profile_btn = wx.Button(self, label='Export Profile')
+        add_transformation_btn = wx.Button(self, label='Add Transformation')
+        draw_field_center_btn = wx.CheckBox(self, label='Draw Field Center')
+        show_control_points_btn = wx.CheckBox(self, label='Show Control Points')
+        mirror_paths_chk = wx.CheckBox(self, label='Mirror Paths')
+        show_control_points_btn.SetValue(self.show_control_points)
+        draw_field_center_btn.SetValue(self.draw_field_center)
+        mirror_paths_chk.SetValue(self.mirror_paths)
 
         # Much like the buttons we create labels and text editing boxes
         waypoint_x_lbl = wx.StaticText(self, label='X')
@@ -402,10 +451,11 @@ class ControlPanel(wx.Panel):
         # Now we 'bind' events from the controls to functions within the
         # application that can handle them.
         # Button click events
-        export_profile.Bind(wx.EVT_BUTTON, self.export_profile)
-        draw_field_center.Bind(wx.EVT_CHECKBOX, self.toggle_draw_field_center)
-        show_control_points.Bind(wx.EVT_CHECKBOX, self.toggle_control_points)
-        mirror_paths.Bind(wx.EVT_CHECKBOX, self.toggle_mirror_paths)
+        add_transformation_btn.Bind(wx.EVT_BUTTON, self.add_transformation)
+        export_profile_btn.Bind(wx.EVT_BUTTON, self.export_profile)
+        draw_field_center_btn.Bind(wx.EVT_CHECKBOX, self.toggle_draw_field_center)
+        show_control_points_btn.Bind(wx.EVT_CHECKBOX, self.toggle_control_points)
+        mirror_paths_chk.Bind(wx.EVT_CHECKBOX, self.toggle_mirror_paths)
 
         self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_y.Bind(wx.EVT_TEXT, self.on_waypoint_change)
@@ -426,13 +476,24 @@ class ControlPanel(wx.Panel):
         hbox.Add(waypoint_heading_lbl, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(self.waypoint_heading, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.AddSpacer(8)
-        hbox.Add(draw_field_center, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(show_control_points, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(mirror_paths, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(draw_field_center_btn, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(show_control_points_btn, 0, wx.EXPAND | wx.ALL, border=border)
+
+        hbox.Add(mirror_paths_chk, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.AddSpacer(8)
-        hbox.Add(export_profile, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(add_transformation_btn, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(export_profile_btn, 0, wx.EXPAND | wx.ALL, border=border)
         self.SetSizer(hbox)
         self.Fit()
+
+    def add_transformation(self, evt):
+        # Make a dialog now?
+        dlg = TransformDialog(None)
+        t = dlg.ShowModal()
+        if t is not None:
+            print('Got a transformation')
+            print(json.dumps(transformations, sort_keys=True, indent=4))
+        dlg.Destroy()
 
     # TODO: Not complete at all yet.
     def export_profile(self, evt):
@@ -496,6 +557,78 @@ class ControlPanel(wx.Panel):
 
         self.field_panel.redraw()
 
+
+class TransformDialog(wx.Dialog):
+
+    def __init__(self, *args, **kw):
+        super(TransformDialog, self).__init__(*args, **kw)
+
+        transform_lbl = wx.StaticText(self, label='Transformation Name')
+        self.transform_name_txt = wx.TextCtrl(self)
+        self.mirrorX_rad = wx.RadioButton(self, label='Mirror X')
+        self.mirrorY_rad = wx.RadioButton(self, label='Mirror Y')
+        self.rotate_rad = wx.RadioButton(self, label='Rotate by X degrees')
+        self.rotate_txt = wx.TextCtrl(self)
+        add_step_btn = wx.Button(self, label='Add Step')
+        cancel_step_btn = wx.Button(self, label='Cancel')
+
+        add_step_btn.Bind(wx.EVT_BUTTON, self.add_step)
+        cancel_step_btn.Bind(wx.EVT_BUTTON, self.cancel_step)
+
+        ELR = wx.EXPAND | wx.LEFT | wx.RIGHT
+
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        border = 20
+        spacing = 8
+        vbox.AddSpacer(spacing)
+        vbox.Add(transform_lbl, 0, ELR, border=border)
+        vbox.AddSpacer(spacing)
+        vbox.Add(self.transform_name_txt, 0, ELR, border=border)
+        vbox.AddSpacer(spacing)
+        vbox.Add(self.mirrorX_rad, 0, ELR, border=border)
+        vbox.AddSpacer(spacing)
+        vbox.Add(self.mirrorY_rad, 0, ELR, border=border)
+        vbox.AddSpacer(spacing)
+
+        hbox = wx.BoxSizer(wx.HORIZONTAL)
+        hbox.Add(self.rotate_rad, 0, ELR, border=border)
+        hbox.AddSpacer(spacing)
+        hbox.Add(self.rotate_txt, 0, ELR, border=border)
+        vbox.Add(hbox, 0, ELR, border=border)
+        vbox.AddSpacer(spacing)
+
+        hbox = wx.BoxSizer(wx.HORIZONTAL)
+        hbox.Add(add_step_btn, 0, ELR, border=border)
+        hbox.AddSpacer(spacing)
+        hbox.Add(cancel_step_btn, 0, ELR, border=border)
+        vbox.Add(hbox, 0, ELR, border=border)
+        vbox.AddSpacer(spacing)
+
+
+        # Give name to overall transformation
+
+        # Radio buttons to select the type of transformation
+        # need: mirror x, mirror y, rotate X degrees
+        # Maybe add translation later
+
+        # Adding w/ button places it in a list of transformations
+        # that can be deleted.
+
+        # Big OK/Cancel buttons at the bottom to close the dialog up
+
+        self.SetSizer(vbox)
+        self.SetTitle("Create/Edit Transformation")
+        self.Fit()
+
+    def add_step(self, evt):
+        print('add')
+        t = Transformation('test', [])
+        global transformations
+        transformations[t.name] = t
+        self.EndModal(True)
+
+    def cancel_step(self, evt):
+        self.EndModal(False)
 
 # A wx Frame that holds the main application and places instanes of our
 # above mentioned Panels in the right spots
