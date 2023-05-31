@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 import wx
-import code
 import json
 import numpy as np
 
-from math import sqrt
+from copy import deepcopy
+from math import sqrt, cos, sin, radians
 from recordclass import recordclass
 from wx.lib.splitter import MultiSplitterWindow
 
 # Using flake8 for linting
+
+_field_background_img = 'field_charged_up.png'
+_field_offset = 52
 
 # Define a type that can hold a waypoint's data.
 # You can think of this like a C struct, POJO (Plain Old Java Object)
@@ -17,13 +20,57 @@ from wx.lib.splitter import MultiSplitterWindow
 Waypoint = recordclass('Waypoint', ['x', 'y', 'v', 'heading'])
 
 
-class Transformation(dict):
-    def __init__(self, name, matrix):
-        self.name = name
+def pp(obj):
+    print(json.dumps(obj, sort_keys=True, indent=4,
+                     default=lambda o: o.__dict__))
+
+
+class TransformationStep(dict):
+    descr: str = ''
+    matrix = []
+    vector = []
+
+    def __init__(self, descr: str, matrix, vector):
+        self.descr = descr
         self.matrix = matrix
+        self.vector = vector
 
 
-transformations = {}
+class Transformation(dict):
+    name: str = 'unknown'
+    steps: list[TransformationStep] = []
+
+    def __init__(self):
+        self.name = 'unknown'
+        self.steps = []
+
+
+transformations = {
+    'RL': Transformation(),
+    'BR': Transformation(),
+    'BL': Transformation(),
+}
+
+transformations['RL'].steps.append(
+    TransformationStep('Mirror Y', [[1, 0], [0, -1]], None)
+)
+transformations['RL'].steps.append(
+    TransformationStep('Translate Y', None, [0, _field_offset*2])
+)
+
+transformations['BL'].steps.append(
+    TransformationStep('Mirror X', [[-1, 0], [0, 1]], None)
+)
+
+transformations['BR'].steps.append(
+    TransformationStep('Mirror X', [[-1, 0], [0, 1]], None)
+)
+transformations['BR'].steps.append(
+    TransformationStep('Mirror Y', [[1, 0], [0, -1]], None)
+)
+transformations['BR'].steps.append(
+    TransformationStep('Translate Y', None, [0, _field_offset*2])
+)
 
 
 # Made our own distance function instead of using Python's built in
@@ -33,13 +80,13 @@ def dist(x1, y1, x2, y2):
 
 
 def triangle_height(way1, way2, way3):
-    a = dist(way1.x, way1.y, way2.x, way2.y)
-    b = dist(way2.x, way2.y, way3.x, way3.y)
+    a = dist(way2.x, way2.y, way3.x, way3.y)
+    b = dist(way1.x, way1.y, way2.x, way2.y)
     c = dist(way3.x, way3.y, way1.x, way1.y)
 
     s = (a + b + c) / 2
     A = sqrt(s * (s - a) * (s - b) * (s - c))
-    h = 2*A / a
+    h = 2*A / b
     return h
 
 
@@ -86,10 +133,6 @@ def get_bezier_coef(points):
     B[n - 1] = (A[n - 1] + points[n]) / 2
 
     return A, B
-
-
-_field_background_img = 'field_charged_up.png'
-_field_offset = 52
 
 
 # A wx Panel that holds the Field drawing portion of the UI
@@ -190,7 +233,7 @@ class FieldPanel(wx.Panel):
         dc.SetFont(font)
         dc.DrawText(str(idx), x, y)
 
-    def _draw_rr_waypoint(self, dc, w, idx):
+    def _draw_orig_waypoint(self, dc, w, idx):
         x, y = self.alter_pos_for_screen(w.x, w.y)
         bgcolor = 'black'
         if self._highlight_node == w:
@@ -199,53 +242,66 @@ class FieldPanel(wx.Panel):
             bgcolor = 'orange'
         self._draw_waypoint(dc, x, y, idx, 'red', bgcolor)
 
-    def _draw_rl_waypoint(self, dc, w, idx):
-        cdiff = _field_offset - w.y
-        mirrory = cdiff + _field_offset
-        x, y = self.alter_pos_for_screen(w.x, mirrory)
-        self._draw_waypoint(dc, x, y, idx, 'red', 'black')
+    def _draw_path(self, dc):
+        sw = self._get_screen_waypoints()
+        gc = wx.GraphicsContext.Create(dc)
 
-    def _draw_bl_waypoint(self, dc, w, idx):
-        x, y = self.alter_pos_for_screen(-w.x, w.y)
-        self._draw_waypoint(dc, x, y, idx, 'blue', 'black')
+        for path_transformation in [None] + list(transformations.values()):
+            path = gc.CreatePath()
+            orig_points = np.array([[w.x, w.y] for w in sw])
+            if path_transformation is None:
+                # Build final matrix
+                final_matrix = np.identity(2)
+                final_vector = np.array([0, 0])
+            else:
+                final_matrix = None
+                final_vector = None
+                for s in reversed(path_transformation.steps):
+                    if s.matrix is not None:
+                        if final_matrix is None:
+                            final_matrix = np.array(s.matrix)
+                        else:
+                            np.dot(final_matrix, np.array(s.matrix))
+                    elif s.vector is not None:
+                        if final_vector is None:
+                            final_vector = np.array(s.vector)
+                        else:
+                            final_vector = final_vector + np.array(s.vector)
+                    else:
+                        print('unhandled ?')
+                if final_matrix is None:
+                    final_matrix = np.identity(2)
+                if final_vector is None:
+                    final_vector = np.array([0, 0])
+            points = np.array(
+                [final_matrix.dot([w.x, w.y]).astype(int) for w in sw]
+            )
+            print('orig:')
+            print(points)
+            print('final:')
+            points += final_vector
+            print(points)
+            print('-----')
+            # Find coefficients
+            A, B = get_bezier_coef(points)
 
-    def _draw_br_waypoint(self, dc, w, idx):
-        cdiff = _field_offset - w.y
-        mirrory = cdiff + _field_offset
-        x, y = self.alter_pos_for_screen(-w.x, mirrory)
-        self._draw_waypoint(dc, x, y, idx, 'blue', 'black')
-
-    def _draw_rr_line(self, dc, start, end):
-        startx, starty = self.alter_pos_for_screen(start.x, start.y)
-        endx, endy = self.alter_pos_for_screen(end.x, end.y)
-        dc.SetPen(wx.Pen('red', 2))
-        dc.DrawLine(startx, starty, endx, endy)
-
-    def _draw_rl_line(self, dc, start, end):
-        cdiff = _field_offset - start.y
-        mirrory = cdiff + _field_offset
-        startx, starty = self.alter_pos_for_screen(start.x, mirrory)
-        cdiff = _field_offset - end.y
-        mirrory = cdiff + _field_offset
-        endx, endy = self.alter_pos_for_screen(end.x, mirrory)
-        dc.SetPen(wx.Pen('lime', 2))
-        dc.DrawLine(startx, starty, endx, endy)
-
-    def _draw_bl_line(self, dc, start, end):
-        startx, starty = self.alter_pos_for_screen(-start.x, start.y)
-        endx, endy = self.alter_pos_for_screen(-end.x, end.y)
-        dc.SetPen(wx.Pen('lime', 2))
-        dc.DrawLine(startx, starty, endx, endy)
-
-    def _draw_br_line(self, dc, start, end):
-        cdiff = _field_offset - start.y
-        mirrory = cdiff + _field_offset
-        startx, starty = self.alter_pos_for_screen(-start.x, mirrory)
-        cdiff = _field_offset - end.y
-        mirrory = cdiff + _field_offset
-        endx, endy = self.alter_pos_for_screen(-end.x, mirrory)
-        dc.SetPen(wx.Pen('red', 2))
-        dc.DrawLine(startx, starty, endx, endy)
+            path.MoveToPoint(points[0, 0], points[0, 1])
+            for end, ctl1P, ctl2P in zip(points[1:], A, B):
+                ctl1 = wx.Point2D()
+                ctl2 = wx.Point2D()
+                ctl1.x = int(ctl1P[0])
+                ctl1.y = int(ctl1P[1])
+                ctl2.x = int(ctl2P[0])
+                ctl2.y = int(ctl2P[1])
+                endP = wx.Point2D(int(end[0]), int(end[1]))
+                # code.interact(local=locals())
+                if self.control_panel.show_control_points:
+                    gc.SetPen(wx.Pen('blue', 2))
+                    dc.DrawCircle(int(ctl1.x), int(ctl1.y), 2)
+                    dc.DrawCircle(int(ctl2.x), int(ctl2.y), 2)
+                path.AddCurveToPoint(ctl1, ctl2, endP)
+            gc.SetPen(wx.Pen('red', 2))
+            gc.StrokePath(path)
 
     def _draw_waypoints(self):
         field_blank = wx.Image(_field_background_img,
@@ -259,49 +315,34 @@ class FieldPanel(wx.Panel):
             sx, sy = self.alter_pos_for_screen(0, -100)
             ex, ey = self.alter_pos_for_screen(0, 100)
             dc.DrawLine(sx, sy, ex, ey)
-        for idx, w in enumerate(self.waypoints):
-            self._draw_rr_waypoint(dc, w, idx)
-            if self.control_panel.mirror_paths:
-                self._draw_rl_waypoint(dc, w, idx)
-                self._draw_bl_waypoint(dc, w, idx)
-                self._draw_br_waypoint(dc, w, idx)
 
-        # Just draw some lines between the waypoints for now.
-        if len(self.waypoints) <= -1:
-            for start, end in zip(self.waypoints, self.waypoints[1:]):
-                self._draw_rr_line(dc, start, end)
-                if self.control_panel.mirror_paths:
-                    self._draw_rl_line(dc, start, end)
-                    self._draw_bl_line(dc, start, end)
-                    self._draw_br_line(dc, start, end)
+        for idx, w in enumerate(self.waypoints):
+            self._draw_orig_waypoint(dc, w, idx)
+            if self.control_panel.draw_translations:
+                for t in transformations.values():
+                    mtx = None
+                    trans_vec = None
+                    for s in t.steps:
+                        if s.matrix is not None:
+                            if mtx is None:
+                                mtx = np.array(s.matrix)
+                            else:
+                                mtx = np.dot(np.array(s.matrix), mtx)
+                        if s.vector is not None:
+                            if trans_vec is None:
+                                trans_vec = np.array(s.vector)
+                            else:
+                                trans_vec += np.array(s.vector)
+
+                    vec = np.array([w.x, w.y])
+                    vec = np.dot(mtx, vec)
+                    if trans_vec is not None:
+                        vec += trans_vec
+                    x, y = self.alter_pos_for_screen(vec[0], vec[1])
+                    self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
 
         if len(self.waypoints) > 2:
-            sw = self._get_screen_waypoints()
-            gc = wx.GraphicsContext.Create(dc)
-            path = gc.CreatePath()
-
-            points = np.array([[w.x, w.y] for w in sw])
-            # Find coefficients
-            A, B = get_bezier_coef(points)
-
-            first_wp = sw.pop(0)
-            path.MoveToPoint(first_wp.x, first_wp.y)
-            for end, ctl1P, ctl2P in zip(points[1:], A, B):
-                ctl1 = wx.Point2D()
-                ctl2 = wx.Point2D()
-                ctl1.x = int(ctl1P[0])
-                ctl1.y = int(ctl1P[1])
-                ctl2.x = int(ctl2P[0])
-                ctl2.y = int(ctl2P[1])
-                endP = wx.Point2D(end[0], end[1])
-                # code.interact(local=locals())
-                if self.control_panel.show_control_points:
-                    gc.SetPen(wx.Pen('blue', 2))
-                    dc.DrawCircle(int(ctl1.x), int(ctl1.y), 2)
-                    dc.DrawCircle(int(ctl2.x), int(ctl2.y), 2)
-                path.AddCurveToPoint(ctl1, ctl2, endP)
-            gc.SetPen(wx.Pen('red', 2))
-            gc.StrokePath(path)
+            self._draw_path(dc)
 
         del dc
         self.field_bmp.SetBitmap(field_blank)
@@ -362,6 +403,9 @@ class FieldPanel(wx.Panel):
             self.waypoints.insert(idx, new_waypoint)
         else:
             self.waypoints.append(new_waypoint)
+        self._selected_node = new_waypoint
+        self.control_panel.select_waypoint(new_waypoint)
+        self._draw_waypoints()
         if False:
             outdata = [fieldx._asdict() for fieldx in self.waypoints]
             print('dumpping', outdata)
@@ -369,9 +413,7 @@ class FieldPanel(wx.Panel):
                 json.dumps(outdata,
                            sort_keys=True, indent=4)
             )
-        self._selected_node = new_waypoint
-        self.control_panel.select_waypoint(new_waypoint)
-        self._draw_waypoints()
+        pass
 
     def find_closest_spline(self, screenx, screeny, max_distance=20):
         # Eh, gonna think about this one.
@@ -426,17 +468,22 @@ class ControlPanel(wx.Panel):
         self.highlight_waypoint = None
         self.show_control_points = False
         self.draw_field_center = True
-        self.mirror_paths = False
+        self.draw_translations = True
 
         # Create button objects. By themselves they do nothing
-        export_profile_btn = wx.Button(self, label='Export Profile')
-        add_transformation_btn = wx.Button(self, label='Add Transformation')
-        draw_field_center_btn = wx.CheckBox(self, label='Draw Field Center')
-        show_control_points_btn = wx.CheckBox(self, label='Show Control Points')
-        mirror_paths_chk = wx.CheckBox(self, label='Mirror Paths')
+        export_profile_btn = wx.Button(self,
+                                       label='Export Profile')
+        add_transformation_btn = wx.Button(self,
+                                           label='Add Transformation')
+        draw_field_center_btn = wx.CheckBox(self,
+                                            label='Draw Field Center')
+        show_control_points_btn = wx.CheckBox(self,
+                                              label='Show Control Points')
+        draw_translations_chk = wx.CheckBox(self,
+                                            label='Draw Translations')
         show_control_points_btn.SetValue(self.show_control_points)
         draw_field_center_btn.SetValue(self.draw_field_center)
-        mirror_paths_chk.SetValue(self.mirror_paths)
+        draw_translations_chk.SetValue(self.draw_translations)
 
         # Much like the buttons we create labels and text editing boxes
         waypoint_x_lbl = wx.StaticText(self, label='X')
@@ -453,9 +500,12 @@ class ControlPanel(wx.Panel):
         # Button click events
         add_transformation_btn.Bind(wx.EVT_BUTTON, self.add_transformation)
         export_profile_btn.Bind(wx.EVT_BUTTON, self.export_profile)
-        draw_field_center_btn.Bind(wx.EVT_CHECKBOX, self.toggle_draw_field_center)
-        show_control_points_btn.Bind(wx.EVT_CHECKBOX, self.toggle_control_points)
-        mirror_paths_chk.Bind(wx.EVT_CHECKBOX, self.toggle_mirror_paths)
+        draw_field_center_btn.Bind(wx.EVT_CHECKBOX,
+                                   self.toggle_draw_field_center)
+        show_control_points_btn.Bind(wx.EVT_CHECKBOX,
+                                     self.toggle_control_points)
+        draw_translations_chk.Bind(wx.EVT_CHECKBOX,
+                                   self.toggle_draw_translations)
 
         self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_y.Bind(wx.EVT_TEXT, self.on_waypoint_change)
@@ -479,7 +529,7 @@ class ControlPanel(wx.Panel):
         hbox.Add(draw_field_center_btn, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(show_control_points_btn, 0, wx.EXPAND | wx.ALL, border=border)
 
-        hbox.Add(mirror_paths_chk, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(draw_translations_chk, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.AddSpacer(8)
         hbox.Add(add_transformation_btn, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(export_profile_btn, 0, wx.EXPAND | wx.ALL, border=border)
@@ -488,11 +538,13 @@ class ControlPanel(wx.Panel):
 
     def add_transformation(self, evt):
         # Make a dialog now?
+        global transformations
         dlg = TransformDialog(None)
         t = dlg.ShowModal()
-        if t is not None:
-            print('Got a transformation')
-            print(json.dumps(transformations, sort_keys=True, indent=4))
+        for n, t in transformations.items():
+            print('Got a transformation', t.name)
+            for s in t.steps:
+                print(s.descr)
         dlg.Destroy()
 
     # TODO: Not complete at all yet.
@@ -510,8 +562,8 @@ class ControlPanel(wx.Panel):
         self.draw_field_center = not self.draw_field_center
         self.field_panel._draw_waypoints()
 
-    def toggle_mirror_paths(self, evt):
-        self.mirror_paths = not self.mirror_paths
+    def toggle_draw_translations(self, evt):
+        self.draw_translations = not self.draw_translations
         self.field_panel._draw_waypoints()
 
     def select_waypoint(self, waypoint: Waypoint):
@@ -560,9 +612,13 @@ class ControlPanel(wx.Panel):
 
 class TransformDialog(wx.Dialog):
 
+    _transformation: Transformation = Transformation()
+    _stepbox: wx.BoxSizer = wx.BoxSizer(wx.VERTICAL)
+
     def __init__(self, *args, **kw):
         super(TransformDialog, self).__init__(*args, **kw)
 
+        self._stepbox: wx.BoxSizer = wx.BoxSizer(wx.VERTICAL)
         transform_lbl = wx.StaticText(self, label='Transformation Name')
         self.transform_name_txt = wx.TextCtrl(self)
         self.mirrorX_rad = wx.RadioButton(self, label='Mirror X')
@@ -570,65 +626,91 @@ class TransformDialog(wx.Dialog):
         self.rotate_rad = wx.RadioButton(self, label='Rotate by X degrees')
         self.rotate_txt = wx.TextCtrl(self)
         add_step_btn = wx.Button(self, label='Add Step')
-        cancel_step_btn = wx.Button(self, label='Cancel')
+        done_btn = wx.Button(self, label='Done')
+        cancel_btn = wx.Button(self, label='Cancel')
 
         add_step_btn.Bind(wx.EVT_BUTTON, self.add_step)
-        cancel_step_btn.Bind(wx.EVT_BUTTON, self.cancel_step)
+        done_btn.Bind(wx.EVT_BUTTON, self.done_dialog)
+        cancel_btn.Bind(wx.EVT_BUTTON, self.cancel_dialog)
 
         ELR = wx.EXPAND | wx.LEFT | wx.RIGHT
 
-        vbox = wx.BoxSizer(wx.VERTICAL)
+        self._mainvbox = wx.BoxSizer(wx.VERTICAL)
         border = 20
         spacing = 8
-        vbox.AddSpacer(spacing)
-        vbox.Add(transform_lbl, 0, ELR, border=border)
-        vbox.AddSpacer(spacing)
-        vbox.Add(self.transform_name_txt, 0, ELR, border=border)
-        vbox.AddSpacer(spacing)
-        vbox.Add(self.mirrorX_rad, 0, ELR, border=border)
-        vbox.AddSpacer(spacing)
-        vbox.Add(self.mirrorY_rad, 0, ELR, border=border)
-        vbox.AddSpacer(spacing)
+
+        self._mainvbox.AddSpacer(spacing)
+        self._mainvbox.Add(self._stepbox)
+        self._mainvbox.AddSpacer(spacing)
+        self._mainvbox.Add(transform_lbl, 0, ELR, border=border)
+        self._mainvbox.AddSpacer(spacing)
+        self._mainvbox.Add(self.transform_name_txt, 0, ELR, border=border)
+        self._mainvbox.AddSpacer(spacing)
+        self._mainvbox.Add(self.mirrorX_rad, 0, ELR, border=border)
+        self._mainvbox.AddSpacer(spacing)
+        self._mainvbox.Add(self.mirrorY_rad, 0, ELR, border=border)
+        self._mainvbox.AddSpacer(spacing)
 
         hbox = wx.BoxSizer(wx.HORIZONTAL)
-        hbox.Add(self.rotate_rad, 0, ELR, border=border)
+        hbox.Add(self.rotate_rad, 0, ELR, border=0)
         hbox.AddSpacer(spacing)
-        hbox.Add(self.rotate_txt, 0, ELR, border=border)
-        vbox.Add(hbox, 0, ELR, border=border)
-        vbox.AddSpacer(spacing)
+        hbox.Add(self.rotate_txt, 0, ELR, border=0)
+        self._mainvbox.Add(hbox, 0, ELR, border=border)
+        self._mainvbox.AddSpacer(spacing)
 
+        self._mainvbox.Add(add_step_btn, 0, ELR, border=border)
+
+        self._mainvbox.AddSpacer(spacing)
         hbox = wx.BoxSizer(wx.HORIZONTAL)
-        hbox.Add(add_step_btn, 0, ELR, border=border)
+        hbox.Add(done_btn, 0, ELR, border=border)
         hbox.AddSpacer(spacing)
-        hbox.Add(cancel_step_btn, 0, ELR, border=border)
-        vbox.Add(hbox, 0, ELR, border=border)
-        vbox.AddSpacer(spacing)
+        hbox.Add(cancel_btn, 0, ELR, border=border)
+        self._mainvbox.Add(hbox, 0, ELR, border=border)
+        self._mainvbox.AddSpacer(spacing)
 
-
-        # Give name to overall transformation
-
-        # Radio buttons to select the type of transformation
-        # need: mirror x, mirror y, rotate X degrees
-        # Maybe add translation later
-
-        # Adding w/ button places it in a list of transformations
-        # that can be deleted.
-
-        # Big OK/Cancel buttons at the bottom to close the dialog up
-
-        self.SetSizer(vbox)
         self.SetTitle("Create/Edit Transformation")
+
+        self.SetSizer(self._mainvbox)
+        self.Fit()
+
+    def update_steps_display(self):
+        self._stepbox.Clear(True)
+        for ts in self._transformation.steps:
+            self._stepbox.Add(wx.StaticText(self, label=ts.descr))
+            self._stepbox.AddSpacer(3)
+        self.SetSizer(self._mainvbox)
         self.Fit()
 
     def add_step(self, evt):
-        print('add')
-        t = Transformation('test', [])
+        s = None
+        if self.mirrorX_rad.GetValue():
+            s = TransformationStep('Mirror X',
+                                   [[-1, 0],
+                                    [ 0, 1]], None)
+        elif self.mirrorY_rad.GetValue():
+            s = TransformationStep('Mirror Y',
+                                   [[1,  0],
+                                    [0, -1]], None)
+        elif self.rotate_rad.GetValue():
+            rads = radians(float(self.rotate_txt.GetValue()))
+            s = TransformationStep('Rotate',
+                                   [[cos(rads), -sin(rads)],
+                                    [sin(rads), cos(rads)]], None)
+
+        self._transformation.steps.append(deepcopy(s))
+        self.update_steps_display()
+        self.Layout()
+
+    def done_dialog(self, evt):
         global transformations
-        transformations[t.name] = t
+        n = self.transform_name_txt.GetValue()
+        self._transformation.name = n
+        transformations[n] = self._transformation
         self.EndModal(True)
 
-    def cancel_step(self, evt):
+    def cancel_dialog(self, evt):
         self.EndModal(False)
+
 
 # A wx Frame that holds the main application and places instanes of our
 # above mentioned Panels in the right spots
