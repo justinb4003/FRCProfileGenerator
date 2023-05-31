@@ -51,22 +51,28 @@ transformations = {
     'BL': Transformation(),
 }
 
+MIRROR_X_MATRIX = [[-1, 0], [0, 1]]
+MIRROR_Y_MATRIX = [[1, 0], [0, -1]]
+ROTATE_90_COUNTER_CLOCKWISE_MATRIX = [[0, -1], [1, 0]]
+ROTATE_90_CLOCKWISE_MATRIX = [[0, 1], [-1, 0]]
+
 transformations['RL'].steps.append(
-    TransformationStep('Mirror Y', [[1, 0], [0, -1]], None)
+    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None)
 )
+
 transformations['RL'].steps.append(
     TransformationStep('Translate Y', None, [0, _field_offset*2])
 )
 
 transformations['BL'].steps.append(
-    TransformationStep('Mirror X', [[-1, 0], [0, 1]], None)
+    TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
 )
 
 transformations['BR'].steps.append(
-    TransformationStep('Mirror X', [[-1, 0], [0, 1]], None)
+    TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
 )
 transformations['BR'].steps.append(
-    TransformationStep('Mirror Y', [[1, 0], [0, -1]], None)
+    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None)
 )
 transformations['BR'].steps.append(
     TransformationStep('Translate Y', None, [0, _field_offset*2])
@@ -243,57 +249,48 @@ class FieldPanel(wx.Panel):
         self._draw_waypoint(dc, x, y, idx, 'red', bgcolor)
 
     def _draw_path(self, dc):
-        sw = self._get_screen_waypoints()
+        # TODO: Honor 'draw translations' boolean
         gc = wx.GraphicsContext.Create(dc)
 
         for path_transformation in [None] + list(transformations.values()):
             path = gc.CreatePath()
-            orig_points = np.array([[w.x, w.y] for w in sw])
-            if path_transformation is None:
-                # Build final matrix
-                final_matrix = np.identity(2)
-                final_vector = np.array([0, 0])
-            else:
-                final_matrix = None
-                final_vector = None
-                for s in reversed(path_transformation.steps):
+            orig_points = np.array([[w.x, w.y] for w in self.waypoints])
+            final_matrix = np.identity(2)
+            final_vector = np.array([0, 0])
+            if path_transformation is not None:
+                for s in path_transformation.steps:
                     if s.matrix is not None:
-                        if final_matrix is None:
-                            final_matrix = np.array(s.matrix)
-                        else:
-                            np.dot(final_matrix, np.array(s.matrix))
+                        final_matrix = np.dot(np.array(s.matrix), final_matrix)
                     elif s.vector is not None:
-                        if final_vector is None:
-                            final_vector = np.array(s.vector)
-                        else:
-                            final_vector = final_vector + np.array(s.vector)
+                        final_vector += np.array(s.vector)
                     else:
                         print('unhandled ?')
-                if final_matrix is None:
-                    final_matrix = np.identity(2)
-                if final_vector is None:
-                    final_vector = np.array([0, 0])
             points = np.array(
-                [final_matrix.dot([w.x, w.y]).astype(int) for w in sw]
+                [final_matrix.dot(
+                    [w.x, w.y]
+                 ).astype(int) for w in self.waypoints]
             )
+            points += final_vector
+            """
             print('orig:')
             print(points)
             print('final:')
-            points += final_vector
             print(points)
             print('-----')
+            """
             # Find coefficients
             A, B = get_bezier_coef(points)
 
-            path.MoveToPoint(points[0, 0], points[0, 1])
+            firstx, firsty = self.alter_pos_for_screen(points[0, 0],
+                                                       points[0, 1])
+            path.MoveToPoint(firstx, firsty)
             for end, ctl1P, ctl2P in zip(points[1:], A, B):
-                ctl1 = wx.Point2D()
-                ctl2 = wx.Point2D()
-                ctl1.x = int(ctl1P[0])
-                ctl1.y = int(ctl1P[1])
-                ctl2.x = int(ctl2P[0])
-                ctl2.y = int(ctl2P[1])
-                endP = wx.Point2D(int(end[0]), int(end[1]))
+                x1, y1 = self.alter_pos_for_screen(ctl1P[0], ctl1P[1])
+                x2, y2 = self.alter_pos_for_screen(ctl2P[0], ctl2P[1])
+                endx, endy = self.alter_pos_for_screen(end[0], end[1])
+                ctl1 = wx.Point2D(x1, y1)
+                ctl2 = wx.Point2D(x2, y2)
+                endP = wx.Point2D(endx, endy)
                 # code.interact(local=locals())
                 if self.control_panel.show_control_points:
                     gc.SetPen(wx.Pen('blue', 2))
@@ -320,24 +317,16 @@ class FieldPanel(wx.Panel):
             self._draw_orig_waypoint(dc, w, idx)
             if self.control_panel.draw_translations:
                 for t in transformations.values():
-                    mtx = None
-                    trans_vec = None
+                    mtx = np.identity(2)
+                    trans_vec = np.array([0, 0])
                     for s in t.steps:
                         if s.matrix is not None:
-                            if mtx is None:
-                                mtx = np.array(s.matrix)
-                            else:
-                                mtx = np.dot(np.array(s.matrix), mtx)
+                            mtx = np.dot(np.array(s.matrix), mtx)
                         if s.vector is not None:
-                            if trans_vec is None:
-                                trans_vec = np.array(s.vector)
-                            else:
-                                trans_vec += np.array(s.vector)
-
+                            trans_vec += np.array(s.vector)
                     vec = np.array([w.x, w.y])
                     vec = np.dot(mtx, vec)
-                    if trans_vec is not None:
-                        vec += trans_vec
+                    vec += trans_vec
                     x, y = self.alter_pos_for_screen(vec[0], vec[1])
                     self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
 
