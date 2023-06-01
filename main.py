@@ -553,22 +553,34 @@ class ControlPanel(wx.Panel):
             lbl = wx.StaticText(self, label=n)
             view_state = 'Hide' if t.visible else 'Show'
             toggle_view = wx.Button(self, wx.ID_ANY, label=view_state, name=n)
+            delete = wx.Button(self, wx.ID_ANY, label='Delete', name=n)
             # use lambda to bind the buttons to a function w/ predefined args
             toggle_view.Bind(
                 wx.EVT_BUTTON,
                 self.toggle_transform_visiblity,
             )
+            delete.Bind(
+                wx.EVT_BUTTON,
+                self.delete_transformation,
+            )
             edit_transform = wx.Button(self, label='...')
             row.Add(lbl, wx.SHRINK)
+            row.Add(delete, wx.SHRINK, border=3)
             row.Add(toggle_view, wx.SHRINK, border=3)
             row.Add(edit_transform, wx.SHRINK, border=3)
             self.transform_display.Add(row, 0, wx.SHRINK | wx.ALL, border=0)
         self.Fit()
         print('ok so far')
 
+    def delete_transformation(self, evt):
+        name = evt.GetEventObject().GetName()
+        global transformations
+        del transformations[name]
+        self.update_transform_display()
+        self.field_panel.redraw()
+
     def toggle_transform_visiblity(self, evt):
         name = evt.GetEventObject().GetName()
-        print('toggle', name)
         transformations[name].visible = not transformations[name].visible
         self.update_transform_display()
         self.field_panel.redraw()
