@@ -50,6 +50,7 @@ class TransformationStep(dict):
 class Transformation(dict):
     name: str = 'unknown'
     steps: list[TransformationStep] = []
+    visible: bool = True
 
     def __init__(self):
         self.name = 'unknown'
@@ -259,8 +260,8 @@ class FieldPanel(wx.Panel):
             final_matrix = np.identity(2)
             final_vector = np.array([0, 0])
             if path_transformation is not None:
-                if not self.control_panel.draw_translations:
-                    break
+                if not path_transformation.visible:
+                    continue
                 for s in path_transformation.steps:
                     if s.matrix is not None:
                         final_matrix = np.dot(np.array(s.matrix), final_matrix)
@@ -321,22 +322,23 @@ class FieldPanel(wx.Panel):
 
         for idx, w in enumerate(self.waypoints):
             self._draw_orig_waypoint(dc, w, idx)
-            if self.control_panel.draw_translations:
-                for t in transformations.values():
-                    mtx = np.identity(2)
-                    trans_vec = np.array([0, 0])
-                    for s in t.steps:
-                        if s.matrix is not None:
-                            mtx = np.dot(np.array(s.matrix), mtx)
-                        if s.vector is not None:
-                            trans_vec += np.array(s.vector)
-                    vec = np.array([w.x, w.y])
-                    vec -= np.array([_field_x_offset, _field_y_offset])
-                    vec = np.dot(mtx, vec)
-                    vec += np.array([_field_x_offset, _field_y_offset])
-                    vec += trans_vec
-                    x, y = self.alter_pos_for_screen(vec[0], vec[1])
-                    self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
+            for t in transformations.values():
+                if not t.visible:
+                    continue
+                mtx = np.identity(2)
+                trans_vec = np.array([0, 0])
+                for s in t.steps:
+                    if s.matrix is not None:
+                        mtx = np.dot(np.array(s.matrix), mtx)
+                    if s.vector is not None:
+                        trans_vec += np.array(s.vector)
+                vec = np.array([w.x, w.y])
+                vec -= np.array([_field_x_offset, _field_y_offset])
+                vec = np.dot(mtx, vec)
+                vec += np.array([_field_x_offset, _field_y_offset])
+                vec += trans_vec
+                x, y = self.alter_pos_for_screen(vec[0], vec[1])
+                self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
 
         if len(self.waypoints) > 2:
             self._draw_path(dc)
@@ -465,7 +467,6 @@ class ControlPanel(wx.Panel):
         self.highlight_waypoint = None
         self.show_control_points = False
         self.draw_field_center = True
-        self.draw_translations = True
 
         # Create button objects. By themselves they do nothing
         export_profile_btn = wx.Button(self,
@@ -476,11 +477,8 @@ class ControlPanel(wx.Panel):
                                             label='Draw Field Center')
         show_control_points_btn = wx.CheckBox(self,
                                               label='Show Control Points')
-        draw_translations_chk = wx.CheckBox(self,
-                                            label='Draw Translations')
         show_control_points_btn.SetValue(self.show_control_points)
         draw_field_center_btn.SetValue(self.draw_field_center)
-        draw_translations_chk.SetValue(self.draw_translations)
 
         # Much like the buttons we create labels and text editing boxes
         field_offset_x_lbl = wx.StaticText(self, label='Field Offset X')
@@ -508,9 +506,6 @@ class ControlPanel(wx.Panel):
                                    self.toggle_draw_field_center)
         show_control_points_btn.Bind(wx.EVT_CHECKBOX,
                                      self.toggle_control_points)
-        draw_translations_chk.Bind(wx.EVT_CHECKBOX,
-                                   self.toggle_draw_translations)
-
         self.field_offset_x_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
         self.field_offset_y_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
         self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
@@ -540,12 +535,43 @@ class ControlPanel(wx.Panel):
         hbox.Add(draw_field_center_btn, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(show_control_points_btn, 0, wx.EXPAND | wx.ALL, border=border)
 
-        hbox.Add(draw_translations_chk, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.AddSpacer(8)
+        self.transform_display = wx.BoxSizer(wx.VERTICAL)
+        self.update_transform_display()
+        hbox.Add(self.transform_display, 0, wx.SHRINK | wx.ALL, border=border)
         hbox.Add(add_transformation_btn, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(export_profile_btn, 0, wx.EXPAND | wx.ALL, border=border)
         self.SetSizer(hbox)
         self.Fit()
+
+    def update_transform_display(self):
+        self.transform_display.Clear(True)
+        for n, t in transformations.items():
+            print(n)
+            row = wx.BoxSizer(wx.HORIZONTAL)
+            row.SetSizeHints(self)
+            lbl = wx.StaticText(self, label=n)
+            view_state = 'Hide' if t.visible else 'Show'
+            toggle_view = wx.Button(self, wx.ID_ANY, label=view_state, name=n)
+            # use lambda to bind the buttons to a function w/ predefined args
+            toggle_view.Bind(
+                wx.EVT_BUTTON,
+                self.toggle_transform_visiblity,
+            )
+            edit_transform = wx.Button(self, label='...')
+            row.Add(lbl, wx.SHRINK)
+            row.Add(toggle_view, wx.SHRINK, border=3)
+            row.Add(edit_transform, wx.SHRINK, border=3)
+            self.transform_display.Add(row, 0, wx.SHRINK | wx.ALL, border=0)
+        self.Fit()
+        print('ok so far')
+
+    def toggle_transform_visiblity(self, evt):
+        name = evt.GetEventObject().GetName()
+        print('toggle', name)
+        transformations[name].visible = not transformations[name].visible
+        self.update_transform_display()
+        self.field_panel.redraw()
 
     def add_transformation(self, evt):
         # Make a dialog now?
@@ -556,6 +582,8 @@ class ControlPanel(wx.Panel):
             print('Got a transformation', t.name)
             for s in t.steps:
                 print(s.descr)
+        self.field_panel.redraw()
+        self.update_transform_display()
         dlg.Destroy()
 
     # TODO: Not complete at all yet.
@@ -571,10 +599,6 @@ class ControlPanel(wx.Panel):
 
     def toggle_draw_field_center(self, evt):
         self.draw_field_center = not self.draw_field_center
-        self.field_panel._draw_waypoints()
-
-    def toggle_draw_translations(self, evt):
-        self.draw_translations = not self.draw_translations
         self.field_panel._draw_waypoints()
 
     def select_waypoint(self, waypoint: Waypoint):
