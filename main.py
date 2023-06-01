@@ -11,7 +11,8 @@ from wx.lib.splitter import MultiSplitterWindow
 # Using flake8 for linting
 
 _field_background_img = 'field_charged_up.png'
-_field_offset = 52
+_field_x_offset = 0
+_field_y_offset = 52
 
 # Define a type that can hold a waypoint's data.
 # You can think of this like a C struct, POJO (Plain Old Java Object)
@@ -23,6 +24,16 @@ Waypoint = recordclass('Waypoint', ['x', 'y', 'v', 'heading'])
 def pp(obj):
     print(json.dumps(obj, sort_keys=True, indent=4,
                      default=lambda o: o.__dict__))
+
+
+def rotation_matrix(deg=None, rad=None):
+    if deg is None and rad is None:
+        raise ValueError('Must specify either degrees or radians')
+    if deg is not None:
+        theta = radians(deg)
+    else:
+        theta = rad
+    return np.array([[cos(theta), -sin(theta)], [sin(theta), cos(theta)]])
 
 
 class TransformationStep(dict):
@@ -53,30 +64,19 @@ transformations = {
 
 MIRROR_X_MATRIX = [[-1, 0], [0, 1]]
 MIRROR_Y_MATRIX = [[1, 0], [0, -1]]
-ROTATE_90_COUNTER_CLOCKWISE_MATRIX = [[0, -1], [1, 0]]
-ROTATE_90_CLOCKWISE_MATRIX = [[0, 1], [-1, 0]]
 
-transformations['RL'].steps.append(
-    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None)
-)
+transformations['RL'].steps = [
+    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
+]
 
-transformations['RL'].steps.append(
-    TransformationStep('Translate Y', None, [0, _field_offset*2])
-)
-
-transformations['BL'].steps.append(
+transformations['BL'].steps = [
     TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
-)
+]
 
-transformations['BR'].steps.append(
-    TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
-)
-transformations['BR'].steps.append(
-    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None)
-)
-transformations['BR'].steps.append(
-    TransformationStep('Translate Y', None, [0, _field_offset*2])
-)
+transformations['BR'].steps = [
+    TransformationStep('Mirror X', MIRROR_X_MATRIX, None),
+    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
+]
 
 
 # Made our own distance function instead of using Python's built in
@@ -85,6 +85,8 @@ def dist(x1, y1, x2, y2):
     return sqrt(abs(x2-x1)**2 + sqrt(abs(y2-y1))**2)
 
 
+# We can use Heron's formula to find the height of a triangle given
+# the lengths of the sides.
 def triangle_height(way1, way2, way3):
     a = dist(way2.x, way2.y, way3.x, way3.y)
     b = dist(way1.x, way1.y, way2.x, way2.y)
@@ -249,7 +251,6 @@ class FieldPanel(wx.Panel):
         self._draw_waypoint(dc, x, y, idx, 'red', bgcolor)
 
     def _draw_path(self, dc):
-        # TODO: Honor 'draw translations' boolean
         gc = wx.GraphicsContext.Create(dc)
 
         for path_transformation in [None] + list(transformations.values()):
@@ -258,6 +259,8 @@ class FieldPanel(wx.Panel):
             final_matrix = np.identity(2)
             final_vector = np.array([0, 0])
             if path_transformation is not None:
+                if not self.control_panel.draw_translations:
+                    break
                 for s in path_transformation.steps:
                     if s.matrix is not None:
                         final_matrix = np.dot(np.array(s.matrix), final_matrix)
@@ -265,11 +268,14 @@ class FieldPanel(wx.Panel):
                         final_vector += np.array(s.vector)
                     else:
                         print('unhandled ?')
+            points = np.array([[w.x, w.y] for w in self.waypoints])
+            points -= np.array([_field_x_offset, _field_y_offset])
             points = np.array(
                 [final_matrix.dot(
-                    [w.x, w.y]
-                 ).astype(int) for w in self.waypoints]
+                    [w[0], w[1]]
+                 ).astype(float) for w in points]
             )
+            points += np.array([_field_x_offset, _field_y_offset])
             points += final_vector
             """
             print('orig:')
@@ -306,11 +312,11 @@ class FieldPanel(wx.Panel):
         dc = wx.MemoryDC(field_blank)
         if self.control_panel and self.control_panel.draw_field_center:
             dc.SetPen(wx.Pen('magenta', 2))
-            sx, sy = self.alter_pos_for_screen(-100, _field_offset)
-            ex, ey = self.alter_pos_for_screen(100, _field_offset)
+            sx, sy = self.alter_pos_for_screen(-100, _field_y_offset)
+            ex, ey = self.alter_pos_for_screen(100, _field_y_offset)
             dc.DrawLine(sx, sy, ex, ey)
-            sx, sy = self.alter_pos_for_screen(0, -100)
-            ex, ey = self.alter_pos_for_screen(0, 100)
+            sx, sy = self.alter_pos_for_screen(_field_x_offset, -100)
+            ex, ey = self.alter_pos_for_screen(_field_x_offset, 100)
             dc.DrawLine(sx, sy, ex, ey)
 
         for idx, w in enumerate(self.waypoints):
@@ -325,7 +331,9 @@ class FieldPanel(wx.Panel):
                         if s.vector is not None:
                             trans_vec += np.array(s.vector)
                     vec = np.array([w.x, w.y])
+                    vec -= np.array([_field_x_offset, _field_y_offset])
                     vec = np.dot(mtx, vec)
+                    vec += np.array([_field_x_offset, _field_y_offset])
                     vec += trans_vec
                     x, y = self.alter_pos_for_screen(vec[0], vec[1])
                     self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
@@ -475,9 +483,16 @@ class ControlPanel(wx.Panel):
         draw_translations_chk.SetValue(self.draw_translations)
 
         # Much like the buttons we create labels and text editing boxes
-        waypoint_x_lbl = wx.StaticText(self, label='X')
+        field_offset_x_lbl = wx.StaticText(self, label='Field Offset X')
+        self.field_offset_x_txt = wx.TextCtrl(self)
+        self.field_offset_x_txt.ChangeValue(str(_field_x_offset))
+        field_offset_y_lbl = wx.StaticText(self, label='Field Offset Y')
+        self.field_offset_y_txt = wx.TextCtrl(self)
+        self.field_offset_y_txt.ChangeValue(str(_field_y_offset))
+
+        waypoint_x_lbl = wx.StaticText(self, label='Selected Waypoint X')
         self.waypoint_x = wx.TextCtrl(self)
-        waypoint_y_lbl = wx.StaticText(self, label='Y')
+        waypoint_y_lbl = wx.StaticText(self, label='Selected Waypoint Y')
         self.waypoint_y = wx.TextCtrl(self)
         waypoint_v_lbl = wx.StaticText(self, label='Velocity (fps)')
         self.waypoint_v = wx.TextCtrl(self)
@@ -496,6 +511,9 @@ class ControlPanel(wx.Panel):
         draw_translations_chk.Bind(wx.EVT_CHECKBOX,
                                    self.toggle_draw_translations)
 
+        self.field_offset_x_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
+        self.field_offset_y_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
+        self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_y.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_v.Bind(wx.EVT_TEXT, self.on_waypoint_change)
@@ -506,6 +524,10 @@ class ControlPanel(wx.Panel):
         # display finally.
         hbox = wx.BoxSizer(wx.VERTICAL)
         border = 5
+        hbox.Add(field_offset_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(self.field_offset_x_txt, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(field_offset_y_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(self.field_offset_y_txt, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(waypoint_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(self.waypoint_x, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(waypoint_y_lbl, 0, wx.EXPAND | wx.ALL, border=border)
@@ -568,6 +590,14 @@ class ControlPanel(wx.Panel):
             self.waypoint_heading.ChangeValue('')
 
         self.active_waypoint = waypoint
+
+    def on_field_offset_change(self, evt):
+        print('offset change')
+        global _field_x_offset, _field_y_offset
+        _field_x_offset = float(self.field_offset_x_txt.GetValue())
+        _field_y_offset = float(self.field_offset_y_txt.GetValue())
+        self.field_panel.redraw()
+        return
 
     def on_waypoint_change(self, evt):
         if self.active_waypoint is None:
