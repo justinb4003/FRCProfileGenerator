@@ -10,6 +10,7 @@ from wx.lib.splitter import MultiSplitterWindow
 
 # Using flake8 for linting
 
+# TODO: These need to be put into a config container of some kind
 _field_background_img = 'field_charged_up.png'
 _field_x_offset = 0
 _field_y_offset = 52
@@ -21,63 +22,11 @@ _field_y_offset = 52
 Waypoint = recordclass('Waypoint', ['x', 'y', 'v', 'heading'])
 
 
+# Helper function to 'pretty pretty' print a Python object in JSON
+# format.
 def pp(obj):
     print(json.dumps(obj, sort_keys=True, indent=4,
                      default=lambda o: o.__dict__))
-
-
-def rotation_matrix(deg=None, rad=None):
-    if deg is None and rad is None:
-        raise ValueError('Must specify either degrees or radians')
-    if deg is not None:
-        theta = radians(deg)
-    else:
-        theta = rad
-    return np.array([[cos(theta), -sin(theta)], [sin(theta), cos(theta)]])
-
-
-class TransformationStep(dict):
-    descr: str = ''
-    matrix = []
-    vector = []
-
-    def __init__(self, descr: str, matrix, vector):
-        self.descr = descr
-        self.matrix = matrix
-        self.vector = vector
-
-
-class Transformation(dict):
-    name: str = 'unknown'
-    steps: list[TransformationStep] = []
-    visible: bool = True
-
-    def __init__(self):
-        self.name = 'unknown'
-        self.steps = []
-
-
-transformations = {
-    'RL': Transformation(),
-    'BR': Transformation(),
-    'BL': Transformation(),
-}
-
-MIRROR_X_MATRIX = [[-1, 0], [0, 1]]
-MIRROR_Y_MATRIX = [[1, 0], [0, -1]]
-
-transformations['RL'].steps = [
-    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
-]
-
-transformations['BL'].steps = [
-    TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
-]
-
-transformations['BR'].steps = [
-    TransformationStep('Mirror X', MIRROR_X_MATRIX, None),
-    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
-]
 
 
 # Made our own distance function instead of using Python's built in
@@ -99,13 +48,15 @@ def triangle_height(way1, way2, way3):
     return h
 
 
-# find the a & b points
+# Given a 2D matrix of points to hit this will return two
+# matrices of the control points that can be used to make a smooth
+# cubic Bezier curve through them all.
 def get_bezier_coef(points):
     show_la = False
-    # since the formulas work given that we have n+1 points
-    # then n must be this:
-    n = len(points) - 1
 
+    # matrix is n x n, one less than total points
+    n = len(points) - 1
+    # TODO: Link to documentation on how the derivative matrix is built
     # build coefficents matrix
     C = 4 * np.identity(n)
     if show_la:
@@ -131,6 +82,8 @@ def get_bezier_coef(points):
     P[0] = points[0] + 2 * points[1]
     P[n - 1] = 8 * points[n - 1] + points[n]
 
+    # TODO: Speed up. Not just for vanity but my laptop gets hot running
+    # this program if I wiggle a waypoint around.
     # solve system, find a & b
     if show_la:
         print('Point Vector')
@@ -144,9 +97,78 @@ def get_bezier_coef(points):
     return A, B
 
 
+# Creates a rotation matrix either with a degree or radian value
+# https://scipython.com/book/chapter-6-numpy/examples/creating-a-rotation-matrix-in-numpy/
+def rotation_matrix(deg=None, rad=None):
+    if deg is None and rad is None:
+        raise ValueError('Must specify either degrees or radians')
+    if deg is not None:
+        theta = radians(deg)
+    else:
+        theta = rad
+    return np.array([[cos(theta), -sin(theta)], [sin(theta), cos(theta)]])
+
+
+# Very routine matrices for mirroring over X or Y axis
+MIRROR_X_MATRIX = [[-1, 0], [0, 1]]
+MIRROR_Y_MATRIX = [[1, 0], [0, -1]]
+
+
+# Container class for a step in an overall transformation. Most transformations
+# will be one step but sometimes we'll mirror over X then Y, so, the
+# Transformation class will hold a list of these.
+class TransformationStep(dict):
+    descr: str = ''
+    matrix = []
+    vector = []
+
+    def __init__(self, descr: str, matrix, vector):
+        self.descr = descr
+        self.matrix = matrix
+        self.vector = vector
+
+
+# Container class for holding a transformation. This is a path based on
+# our primary one but mirrored or rotated around a center point on the field.
+# Using ChargedUp as an example if your main route was "Red Right" or 'RR'
+# then starting from Red Left might be named RL, Blue Right would be BR, and
+# Blue Left BL.
+class Transformation(dict):
+    name: str = 'unknown'
+    steps: list[TransformationStep] = []
+    visible: bool = True
+
+    def __init__(self):
+        self.name = 'unknown'
+        self.steps = []
+
+
+# TODO: Also move this into some kind of state object
+transformations = {
+    'RL': Transformation(),
+    'BR': Transformation(),
+    'BL': Transformation(),
+}
+
+transformations['RL'].steps = [
+    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
+]
+
+transformations['BL'].steps = [
+    TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
+]
+
+transformations['BR'].steps = [
+    TransformationStep('Mirror X', MIRROR_X_MATRIX, None),
+    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
+]
+
+
 # A wx Panel that holds the Field drawing portion of the UI
 class FieldPanel(wx.Panel):
+    # Node that we've actually clicked on
     _selected_node = None
+    # Node that we're near enough to to highlight
     _highlight_node = None
 
     def __init__(self, parent):
@@ -174,31 +196,40 @@ class FieldPanel(wx.Panel):
         # on_field_click function which hands the event.
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
         self.field_bmp.Bind(wx.EVT_RIGHT_DOWN, self.on_field_click_right)
-        self.field_bmp.Bind(wx.EVT_MOTION, self.on_mouse_drag)
+        self.field_bmp.Bind(wx.EVT_MOTION, self.on_mouse_move)
         hbox.Add(self.field_bmp, 0, wx.EXPAND | wx.ALL)
         self.SetSizer(hbox)
         self.Fit()
-        self._draw_waypoints()
+        self.redraw()
 
-    def on_mouse_drag(self, event):
+    # Event fires any time the mouse moves on the field drawing
+    def on_mouse_move(self, event):
         x, y = event.GetPosition()
-        fieldx, fieldy = self.alter_pos_for_field(x, y)
+        fieldx, fieldy = self._screen_to_field(x, y)
+
+        # If we're not dragging an object/waypoint then we're just going to
+        # see if the mouse is near a node. If so, we'll highlight it to
+        # indicate that if the user left clicks it will be selected.
         if not event.Dragging():
             event.Skip()
             last_highlight = self._highlight_node
             self._highlight_node = self._find_closest_waypoint(fieldx, fieldy)
+            # We only wan to redraw the grid if we actually changed the
+            # highlight node
             if last_highlight != self._highlight_node:
-                self._draw_waypoints()
+                self.redraw()
             return
         event.Skip()
         # print("Dragging position", x, y)
+        # If we're in a drag motion and have a seleted node we need to
+        # update its coordinates to the mouse position and redraw everything.
         if self._selected_node is not None:
             self._selected_node.x = fieldx
             self._selected_node.y = fieldy
             self.control_panel.select_waypoint(self._selected_node)
-            self._draw_waypoints()
+            self.redraw()
 
-    def alter_pos_for_field(self, x, y):
+    def _screen_to_field(self, x, y):
         # TODO: Make this linear algebra
         # 640 is center for x
         # 300 is center for y
@@ -208,7 +239,7 @@ class FieldPanel(wx.Panel):
         y /= 2
         return x, y
 
-    def alter_pos_for_screen(self, x, y):
+    def _field_to_screen(self, x, y):
         # TODO: Make this linear algebra
         x *= 2
         y *= 2
@@ -216,14 +247,17 @@ class FieldPanel(wx.Panel):
         y += 300
         return int(x), int(y)
 
+    # We use the right click to delete a node that's close to the click
     def on_field_click_right(self, evt):
         x, y = evt.GetPosition()
-        x, y = self.alter_pos_for_field(x, y)
+        x, y = self._screen_to_field(x, y)
         self.del_node(x, y)
 
+    # Clicking on the field can either select or add a node depending
+    # on where it happens.
     def on_field_click(self, evt):
         x, y = evt.GetPosition()
-        fieldx, fieldy = self.alter_pos_for_field(x, y)
+        fieldx, fieldy = self._screen_to_field(x, y)
         # print(f'Clicky hit at {x},{y}')
         selnode = self._find_closest_waypoint(fieldx, fieldy)
         if selnode is None:
@@ -231,6 +265,7 @@ class FieldPanel(wx.Panel):
         else:
             self.sel_node(fieldx, fieldy)
 
+    # Internal function to draw a waypoint on the field
     def _draw_waypoint(self, dc, x, y, idx, marker_fg, marker_bg):
         dc.SetBrush(wx.Brush(marker_bg))
         dc.SetPen(wx.Pen(marker_fg, 4))
@@ -242,8 +277,10 @@ class FieldPanel(wx.Panel):
         dc.SetFont(font)
         dc.DrawText(str(idx), x, y)
 
+    # Draw an original waypoint in the proper color. These are (currently)
+    # the only editable ones.
     def _draw_orig_waypoint(self, dc, w, idx):
-        x, y = self.alter_pos_for_screen(w.x, w.y)
+        x, y = self._field_to_screen(w.x, w.y)
         bgcolor = 'black'
         if self._highlight_node == w:
             bgcolor = 'white'
@@ -251,12 +288,13 @@ class FieldPanel(wx.Panel):
             bgcolor = 'orange'
         self._draw_waypoint(dc, x, y, idx, 'red', bgcolor)
 
+    # Draw the entire path between all of our waypoints and all of the
+    # transformations we've defined and asked to be visible.
     def _draw_path(self, dc):
         gc = wx.GraphicsContext.Create(dc)
 
         for path_transformation in [None] + list(transformations.values()):
             path = gc.CreatePath()
-            orig_points = np.array([[w.x, w.y] for w in self.waypoints])
             final_matrix = np.identity(2)
             final_vector = np.array([0, 0])
             if path_transformation is not None:
@@ -285,21 +323,20 @@ class FieldPanel(wx.Panel):
             print(points)
             print('-----')
             """
-            # Find coefficients
+            # Find control points for Bezier curves
             A, B = get_bezier_coef(points)
 
-            firstx, firsty = self.alter_pos_for_screen(points[0, 0],
-                                                       points[0, 1])
+            firstx, firsty = self._field_to_screen(points[0, 0], points[0, 1])
             path.MoveToPoint(firstx, firsty)
             for end, ctl1P, ctl2P in zip(points[1:], A, B):
-                x1, y1 = self.alter_pos_for_screen(ctl1P[0], ctl1P[1])
-                x2, y2 = self.alter_pos_for_screen(ctl2P[0], ctl2P[1])
-                endx, endy = self.alter_pos_for_screen(end[0], end[1])
+                x1, y1 = self._field_to_screen(ctl1P[0], ctl1P[1])
+                x2, y2 = self._field_to_screen(ctl2P[0], ctl2P[1])
+                endx, endy = self._field_to_screen(end[0], end[1])
                 ctl1 = wx.Point2D(x1, y1)
                 ctl2 = wx.Point2D(x2, y2)
                 endP = wx.Point2D(endx, endy)
-                # code.interact(local=locals())
                 if self.control_panel.show_control_points:
+                    # TODO: Figure out how I broke the color on control points
                     gc.SetPen(wx.Pen('blue', 2))
                     dc.DrawCircle(int(ctl1.x), int(ctl1.y), 2)
                     dc.DrawCircle(int(ctl2.x), int(ctl2.y), 2)
@@ -307,18 +344,44 @@ class FieldPanel(wx.Panel):
             gc.SetPen(wx.Pen('red', 2))
             gc.StrokePath(path)
 
-    def _draw_waypoints(self):
+    # Draw a crosshairs on the field center, or what we consider center
+    # for all mirror and rotation operations.
+    def _draw_field_center(self, dc, cross_size=100):
+        dc.SetPen(wx.Pen('magenta', 2))
+        sx, sy = self._field_to_screen(-cross_size, _field_y_offset)
+        ex, ey = self._field_to_screen(cross_size, _field_y_offset)
+        dc.DrawLine(sx, sy, ex, ey)
+        sx, sy = self._field_to_screen(_field_x_offset, -cross_size)
+        ex, ey = self._field_to_screen(_field_x_offset, cross_size)
+        dc.DrawLine(sx, sy, ex, ey)
+
+    def _get_screen_waypoints(self):
+        return [
+            Waypoint(self._field_to_screen(x, y), 10, 0)
+            for x, y in self.waypoints
+        ]
+
+    # When a click on the field occurs we locate the waypoint closest to that
+    # click so we know which one the users wishes to operate on.
+    # The distance_limit threshold sets a max distance the user can be away
+    # from the center of a point before we disregard it.
+    def _find_closest_waypoint(self, x, y, distance_limit=4):
+        closest_distance = distance_limit + 1
+        closest_waypoint = None
+        for w in self.waypoints:
+            d = dist(x, y, w.x, w.y)
+            if d < distance_limit and d < closest_distance:
+                closest_distance = d
+                closest_waypoint = w
+        return closest_waypoint
+
+    # Draw all waypoints and paths on the field
+    def redraw(self):
         field_blank = wx.Image(_field_background_img,
                                wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
         if self.control_panel and self.control_panel.draw_field_center:
-            dc.SetPen(wx.Pen('magenta', 2))
-            sx, sy = self.alter_pos_for_screen(-100, _field_y_offset)
-            ex, ey = self.alter_pos_for_screen(100, _field_y_offset)
-            dc.DrawLine(sx, sy, ex, ey)
-            sx, sy = self.alter_pos_for_screen(_field_x_offset, -100)
-            ex, ey = self.alter_pos_for_screen(_field_x_offset, 100)
-            dc.DrawLine(sx, sy, ex, ey)
+            self._draw_field_center(dc)
 
         for idx, w in enumerate(self.waypoints):
             self._draw_orig_waypoint(dc, w, idx)
@@ -337,7 +400,7 @@ class FieldPanel(wx.Panel):
                 vec = np.dot(mtx, vec)
                 vec += np.array([_field_x_offset, _field_y_offset])
                 vec += trans_vec
-                x, y = self.alter_pos_for_screen(vec[0], vec[1])
+                x, y = self._field_to_screen(vec[0], vec[1])
                 self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
 
         if len(self.waypoints) > 2:
@@ -346,29 +409,7 @@ class FieldPanel(wx.Panel):
         del dc
         self.field_bmp.SetBitmap(field_blank)
 
-    def _get_screen_waypoints(self):
-        screen_waypoints = []
-        for w in self.waypoints:
-            x, y = self.alter_pos_for_screen(w.x, w.y)
-            sw = Waypoint(x, y, 10, 0)
-            screen_waypoints.append(sw)
-        return screen_waypoints
-
-    # When a click on the field occurs we locate the waypoint closest to that
-    # click so we know which one the users wishes to operate on.
-    # The distance_limit threshold sets a max distance the user can be away
-    # from the center of a point before we disregard it.
-    def _find_closest_waypoint(self, x, y, distance_limit=4):
-        closest_distance = distance_limit + 1
-        closest_waypoint = None
-        for w in self.waypoints:
-            d = dist(x, y, w.x, w.y)
-            if d < distance_limit and d < closest_distance:
-                closest_distance = d
-                closest_waypoint = w
-        return closest_waypoint
-
-    # Adds a new waypoint to the end of the list where the user clicked
+    # Adds a new waypoint
     def add_node(self, fieldx, fieldy):
         print(f'Add node at {fieldx}, {fieldy}')
         # Defaulting velocity and headings for now.
@@ -404,7 +445,7 @@ class FieldPanel(wx.Panel):
             self.waypoints.append(new_waypoint)
         self._selected_node = new_waypoint
         self.control_panel.select_waypoint(new_waypoint)
-        self._draw_waypoints()
+        self.redraw()
         if False:
             outdata = [fieldx._asdict() for fieldx in self.waypoints]
             print('dumpping', outdata)
@@ -413,10 +454,6 @@ class FieldPanel(wx.Panel):
                            sort_keys=True, indent=4)
             )
         pass
-
-    def find_closest_spline(self, screenx, screeny, max_distance=20):
-        # Eh, gonna think about this one.
-        return None
 
     # Delete the closest waypoint to the click
     # Or if we're not on a waypoint add one here between
@@ -434,10 +471,10 @@ class FieldPanel(wx.Panel):
             spline_start = self.find_closest_spline(x, y)
             if spline_start is not None:
                 start_index = self.waypoints.index(spline_start)
-                fieldx, fieldy = self.alter_pos_for_field(x, y)
+                fieldx, fieldy = self._screen_to_field(x, y)
                 w = Waypoint(fieldx, fieldy, 10, 0)
                 self.waypoints.insert(start_index+1, w)
-        self._draw_waypoints()
+        self.redraw()
 
     # select the closest waypoint to the click for modification
     # via the controls in the control panel UI
@@ -448,14 +485,6 @@ class FieldPanel(wx.Panel):
             self._selected_node = selnode
             self.control_panel.select_waypoint(selnode)
         self.redraw()
-
-    # A more 'public' method (lack of an underscore means it's OK to call it)
-    # that redraws the field with all the required decorations. Eventually
-    # the field draw will encompass more than one function so the control
-    # panel should just call this instead of needing to know which internals
-    # all need to be hit together.
-    def redraw(self):
-        self._draw_waypoints()
 
 
 # A wx Panel that holds the controls on the right side, or 'control' panel
@@ -741,7 +770,7 @@ class TransformDialog(wx.Dialog):
         if self.mirrorX_rad.GetValue():
             s = TransformationStep('Mirror X',
                                    [[-1, 0],
-                                    [ 0, 1]], None)
+                                    [ 0, 1]], None)  # noqa
         elif self.mirrorY_rad.GetValue():
             s = TransformationStep('Mirror Y',
                                    [[1,  0],
@@ -775,7 +804,7 @@ class MainWindow(wx.Frame):
                           parent,
                           id,
                           'Profile Generation',
-                          size=(1460, 800))
+                          size=(1660, 800))
 
         self.splitter = MultiSplitterWindow(self, style=wx.SP_LIVE_UPDATE)
         self.control_panel = ControlPanel(self.splitter)
@@ -804,7 +833,7 @@ class MainWindow(wx.Frame):
 
     def set_waypoints(self, waypoints):
         self.field_panel.waypoints = waypoints
-        self.field_panel._draw_waypoints()
+        self.field_panel.redraw()
 
 
 def buildit(waypoints):
