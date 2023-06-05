@@ -32,4 +32,4 @@ pip install -r requirements.txt
 ```
 python main.py
 ```
-![Application screenshot showing Rapid React field in one panel with control elements in another.](https://github.com/justinb4003/FRCProfileGenerator/blob/main/screenshots/screen1.png?raw=true)
+![Application screenshot showing Charged Up game field in one panel with control elements in another.](https://github.com/justinb4003/FRCProfileGenerator/assets/16728804/a4c3dc45-dea7-4e7e-bbc4-7c758e79731b)
