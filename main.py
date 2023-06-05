@@ -56,7 +56,10 @@ def get_bezier_coef(points):
 
     # matrix is n x n, one less than total points
     n = len(points) - 1
-    # TODO: Link to documentation on how the derivative matrix is built
+
+    # Complete documentation what we're doing is here:
+    # https://towardsdatascience.com/b%C3%A9zier-interpolation-8033e9a262c2
+
     # build coefficents matrix
     C = 4 * np.identity(n)
     if show_la:
@@ -74,7 +77,7 @@ def get_bezier_coef(points):
     C[n - 1, n - 1] = 7
     C[n - 1, n - 2] = 2
     if show_la:
-        print('Constants from derivs')
+        print('Constants from derivatives')
         print(C)
 
     # build points vector
@@ -82,18 +85,20 @@ def get_bezier_coef(points):
     P[0] = points[0] + 2 * points[1]
     P[n - 1] = 8 * points[n - 1] + points[n]
 
-    # TODO: Speed up. Not just for vanity but my laptop gets hot running
-    # this program if I wiggle a waypoint around.
-    # solve system, find a & b
     if show_la:
         print('Point Vector')
         print(P)
+    # TODO: Speed up. Not just for vanity but my laptop gets hot running
+    # this program if I wiggle a waypoint around.
+    # solve system aka find control points.
     A = np.linalg.solve(C, P)
     B = [0] * n
     for i in range(n - 1):
         B[i] = 2 * points[i + 1] - A[i + 1]
     B[n - 1] = (A[n - 1] + points[n]) / 2
 
+    # A contains the "control point 1" for each segment
+    # B contains the "control point 2" for each segment
     return A, B
 
 
@@ -110,8 +115,10 @@ def rotation_matrix(deg=None, rad=None):
 
 
 # Very routine matrices for mirroring over X or Y axis
-MIRROR_X_MATRIX = [[-1, 0], [0, 1]]
-MIRROR_Y_MATRIX = [[1, 0], [0, -1]]
+MIRROR_X_MATRIX = [[-1, 0],
+                   [ 0, 1]]  # noqa
+MIRROR_Y_MATRIX = [[1,  0],
+                   [0, -1]]
 
 
 # Container class for a step in an overall transformation. Most transformations
