@@ -10,16 +10,80 @@ from wx.lib.splitter import MultiSplitterWindow
 
 # Using flake8 for linting
 
-# TODO: These need to be put into a config container of some kind
-_field_background_img = 'field_charged_up.png'
-_field_x_offset = 0
-_field_y_offset = 52
-
 # Define a type that can hold a waypoint's data.
 # You can think of this like a C struct, POJO (Plain Old Java Object)
 # POCO (Plain old C# Object) or as if we defined an actual Python
 # class for this, but this is much shorter and simpler.
 Waypoint = recordclass('Waypoint', ['x', 'y', 'v', 'heading'])
+
+
+# Container class for a step in an overall transformation. Most transformations
+# will be one step but sometimes we'll mirror over X then Y, so, the
+# Transformation class will hold a list of these.
+class TransformationStep(dict):
+    descr: str = ''
+    matrix = []
+    vector = []
+
+    def __init__(self, descr: str, matrix, vector):
+        self.descr = descr
+        self.matrix = matrix
+        self.vector = vector
+
+
+# Container class for holding a transformation. This is a path based on
+# our primary one but mirrored or rotated around a center point on the field.
+# Using ChargedUp as an example if your main route was "Red Right" or 'RR'
+# then starting from Red Left might be named RL, Blue Right would be BR, and
+# Blue Left BL.
+class Transformation(dict):
+    name: str = 'unknown'
+    steps: list[TransformationStep] = []
+    visible: bool = True
+
+    def __init__(self):
+        self.name = 'unknown'
+        self.steps = []
+
+
+# Very routine matrices for mirroring over X or Y axis
+MIRROR_X_MATRIX = [[-1, 0],
+                   [ 0, 1]]  # noqa
+MIRROR_Y_MATRIX = [[1,  0],
+                   [0, -1]]
+
+
+FIELD_BACKGROUND_IMAGE = 'field_background_img'
+FIELD_X_OFFSET = 'field_x_offset'
+FIELD_Y_OFFSET = 'field_y_offset'
+
+TFMS = 'transformations'
+
+_app_state = {
+    FIELD_BACKGROUND_IMAGE: 'field_charged_up.png',
+    FIELD_X_OFFSET: 0,
+    FIELD_Y_OFFSET: 52,
+    TFMS: {},
+}
+
+_app_state[TFMS] = {
+    'RL': Transformation(),
+    'BR': Transformation(),
+    'BL': Transformation(),
+}
+
+_app_state[TFMS]['RL'].steps = [
+    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
+]
+
+_app_state[TFMS]['BL'].steps = [
+    TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
+]
+
+_app_state[TFMS]['BR'].steps = [
+    TransformationStep('Mirror X', MIRROR_X_MATRIX, None),
+    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
+]
 
 
 # Helper function to 'pretty pretty' print a Python object in JSON
@@ -114,62 +178,6 @@ def rotation_matrix(deg=None, rad=None):
     return np.array([[cos(theta), -sin(theta)], [sin(theta), cos(theta)]])
 
 
-# Very routine matrices for mirroring over X or Y axis
-MIRROR_X_MATRIX = [[-1, 0],
-                   [ 0, 1]]  # noqa
-MIRROR_Y_MATRIX = [[1,  0],
-                   [0, -1]]
-
-
-# Container class for a step in an overall transformation. Most transformations
-# will be one step but sometimes we'll mirror over X then Y, so, the
-# Transformation class will hold a list of these.
-class TransformationStep(dict):
-    descr: str = ''
-    matrix = []
-    vector = []
-
-    def __init__(self, descr: str, matrix, vector):
-        self.descr = descr
-        self.matrix = matrix
-        self.vector = vector
-
-
-# Container class for holding a transformation. This is a path based on
-# our primary one but mirrored or rotated around a center point on the field.
-# Using ChargedUp as an example if your main route was "Red Right" or 'RR'
-# then starting from Red Left might be named RL, Blue Right would be BR, and
-# Blue Left BL.
-class Transformation(dict):
-    name: str = 'unknown'
-    steps: list[TransformationStep] = []
-    visible: bool = True
-
-    def __init__(self):
-        self.name = 'unknown'
-        self.steps = []
-
-
-# TODO: Also move this into some kind of state object
-transformations = {
-    'RL': Transformation(),
-    'BR': Transformation(),
-    'BL': Transformation(),
-}
-
-transformations['RL'].steps = [
-    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
-]
-
-transformations['BL'].steps = [
-    TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
-]
-
-transformations['BR'].steps = [
-    TransformationStep('Mirror X', MIRROR_X_MATRIX, None),
-    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
-]
-
 
 # A wx Panel that holds the Field drawing portion of the UI
 class FieldPanel(wx.Panel):
@@ -190,7 +198,7 @@ class FieldPanel(wx.Panel):
         # The BoxSizer is a layout manager that arranges the controls in a box
         hbox = wx.BoxSizer(wx.VERTICAL)
         # Load in the field image
-        field = wx.Image(_field_background_img,
+        field = wx.Image(_app_state[FIELD_BACKGROUND_IMAGE],
                          wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         self.w = field.GetWidth()
         self.h = field.GetHeight()
@@ -200,7 +208,7 @@ class FieldPanel(wx.Panel):
                                          pos=(0, 0),
                                          size=(self.w, self.h))
         # Here any click that happens inside the field area will trigger the
-        # on_field_click function which hands the event.
+        # on_field_click function which handles the event.
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
         self.field_bmp.Bind(wx.EVT_RIGHT_DOWN, self.on_field_click_right)
         self.field_bmp.Bind(wx.EVT_MOTION, self.on_mouse_move)
@@ -300,7 +308,7 @@ class FieldPanel(wx.Panel):
     def _draw_path(self, dc):
         gc = wx.GraphicsContext.Create(dc)
 
-        for path_transformation in [None] + list(transformations.values()):
+        for path_transformation in [None] + list(_app_state[TFMS].values()):
             path = gc.CreatePath()
             final_matrix = np.identity(2)
             final_vector = np.array([0, 0])
@@ -315,13 +323,15 @@ class FieldPanel(wx.Panel):
                     else:
                         print('unhandled ?')
             points = np.array([[w.x, w.y] for w in self.waypoints])
-            points -= np.array([_field_x_offset, _field_y_offset])
+            points -= np.array([_app_state[FIELD_X_OFFSET],
+                                _app_state[FIELD_Y_OFFSET]])
             points = np.array(
                 [final_matrix.dot(
                     [w[0], w[1]]
                  ).astype(float) for w in points]
             )
-            points += np.array([_field_x_offset, _field_y_offset])
+            points += np.array([_app_state[FIELD_X_OFFSET],
+                                _app_state[FIELD_Y_OFFSET]])
             points += final_vector
             """
             print('orig:')
@@ -355,11 +365,13 @@ class FieldPanel(wx.Panel):
     # for all mirror and rotation operations.
     def _draw_field_center(self, dc, cross_size=100):
         dc.SetPen(wx.Pen('magenta', 2))
-        sx, sy = self._field_to_screen(-cross_size, _field_y_offset)
-        ex, ey = self._field_to_screen(cross_size, _field_y_offset)
+        sx, sy = self._field_to_screen(-cross_size,
+                                       _app_state[FIELD_Y_OFFSET])
+        ex, ey = self._field_to_screen(cross_size, _app_state[FIELD_Y_OFFSET])
         dc.DrawLine(sx, sy, ex, ey)
-        sx, sy = self._field_to_screen(_field_x_offset, -cross_size)
-        ex, ey = self._field_to_screen(_field_x_offset, cross_size)
+        sx, sy = self._field_to_screen(_app_state[FIELD_X_OFFSET],
+                                       -cross_size)
+        ex, ey = self._field_to_screen(_app_state[FIELD_X_OFFSET], cross_size)
         dc.DrawLine(sx, sy, ex, ey)
 
     def _get_screen_waypoints(self):
@@ -384,7 +396,7 @@ class FieldPanel(wx.Panel):
 
     # Draw all waypoints and paths on the field
     def redraw(self):
-        field_blank = wx.Image(_field_background_img,
+        field_blank = wx.Image(_app_state[FIELD_BACKGROUND_IMAGE],
                                wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
         if self.control_panel and self.control_panel.draw_field_center:
@@ -392,7 +404,7 @@ class FieldPanel(wx.Panel):
 
         for idx, w in enumerate(self.waypoints):
             self._draw_orig_waypoint(dc, w, idx)
-            for t in transformations.values():
+            for t in _app_state[TFMS].values():
                 if not t.visible:
                     continue
                 mtx = np.identity(2)
@@ -403,9 +415,10 @@ class FieldPanel(wx.Panel):
                     if s.vector is not None:
                         trans_vec += np.array(s.vector)
                 vec = np.array([w.x, w.y])
-                vec -= np.array([_field_x_offset, _field_y_offset])
+                vec -= np.array([_app_state[FIELD_X_OFFSET],
+                                 _app_state[FIELD_Y_OFFSET]])
                 vec = np.dot(mtx, vec)
-                vec += np.array([_field_x_offset, _field_y_offset])
+                vec += np.array([_app_state[FIELD_X_OFFSET], _app_state[FIELD_Y_OFFSET]])
                 vec += trans_vec
                 x, y = self._field_to_screen(vec[0], vec[1])
                 self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
@@ -519,10 +532,10 @@ class ControlPanel(wx.Panel):
         # Much like the buttons we create labels and text editing boxes
         field_offset_x_lbl = wx.StaticText(self, label='Field Offset X')
         self.field_offset_x_txt = wx.TextCtrl(self)
-        self.field_offset_x_txt.ChangeValue(str(_field_x_offset))
+        self.field_offset_x_txt.ChangeValue(str(_app_state[FIELD_X_OFFSET]))
         field_offset_y_lbl = wx.StaticText(self, label='Field Offset Y')
         self.field_offset_y_txt = wx.TextCtrl(self)
-        self.field_offset_y_txt.ChangeValue(str(_field_y_offset))
+        self.field_offset_y_txt.ChangeValue(str(_app_state[FIELD_Y_OFFSET]))
 
         waypoint_x_lbl = wx.StaticText(self, label='Selected Waypoint X')
         self.waypoint_x = wx.TextCtrl(self)
@@ -582,7 +595,7 @@ class ControlPanel(wx.Panel):
 
     def update_transform_display(self):
         self.transform_display.Clear(True)
-        for n, t in transformations.items():
+        for n, t in _app_state[TFMS].items():
             print(n)
             row = wx.BoxSizer(wx.HORIZONTAL)
             row.SetSizeHints(self)
@@ -610,23 +623,23 @@ class ControlPanel(wx.Panel):
 
     def delete_transformation(self, evt):
         name = evt.GetEventObject().GetName()
-        global transformations
-        del transformations[name]
+        global _app_state
+        del _app_state[TFMS][name]
         self.update_transform_display()
         self.field_panel.redraw()
 
     def toggle_transform_visiblity(self, evt):
         name = evt.GetEventObject().GetName()
-        transformations[name].visible = not transformations[name].visible
+        _app_state[TFMS][name].visible = not _app_state[TFMS][name].visible
         self.update_transform_display()
         self.field_panel.redraw()
 
     def add_transformation(self, evt):
         # Make a dialog now?
-        global transformations
+        global _app_state
         dlg = TransformDialog(None)
         t = dlg.ShowModal()
-        for n, t in transformations.items():
+        for n, t in _app_state[TFMS].items():
             print('Got a transformation', t.name)
             for s in t.steps:
                 print(s.descr)
@@ -665,9 +678,9 @@ class ControlPanel(wx.Panel):
 
     def on_field_offset_change(self, evt):
         print('offset change')
-        global _field_x_offset, _field_y_offset
-        _field_x_offset = float(self.field_offset_x_txt.GetValue())
-        _field_y_offset = float(self.field_offset_y_txt.GetValue())
+        global _app_state
+        _app_state[FIELD_X_OFFSET] = float(self.field_offset_x_txt.GetValue())
+        _app_state[FIELD_Y_OFFSET] = float(self.field_offset_y_txt.GetValue())
         self.field_panel.redraw()
         return
 
@@ -793,10 +806,10 @@ class TransformDialog(wx.Dialog):
         self.Layout()
 
     def done_dialog(self, evt):
-        global transformations
+        global _app_state
         n = self.transform_name_txt.GetValue()
         self._transformation.name = n
-        transformations[n] = self._transformation
+        _app_state[TFMS][n] = self._transformation
         self.EndModal(True)
 
     def cancel_dialog(self, evt):
