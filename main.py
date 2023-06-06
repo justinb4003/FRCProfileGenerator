@@ -2,6 +2,7 @@
 from datetime import date, time
 import wx
 import json
+import math
 import numpy as np
 
 from copy import deepcopy
@@ -68,6 +69,9 @@ MIRROR_Y_MATRIX = [[1,  0],
 FIELD_BACKGROUND_IMAGE = 'field_background_img'
 FIELD_X_OFFSET = 'field_x_offset'
 FIELD_Y_OFFSET = 'field_y_offset'
+WAYPOINT_DISTANCE_LIMIT = 'waypoint_select_distance_limit'
+CROSSHAIR_LENGTH = 'crosshair_length'
+CROSSHAIR_THICKNESS = 'crosshair_thickness'
 
 TFMS = 'transformations'
 
@@ -75,6 +79,9 @@ _app_state = {
     FIELD_BACKGROUND_IMAGE: 'field_charged_up.png',
     FIELD_X_OFFSET: 0,
     FIELD_Y_OFFSET: 52,
+    WAYPOINT_DISTANCE_LIMIT: 15,
+    CROSSHAIR_LENGTH: 50,
+    CROSSHAIR_THICKNESS: 10,
     TFMS: {},
 }
 
@@ -121,7 +128,9 @@ def pp(obj):
 
 # Made our own distance function instead of using Python's built in
 # math.dist because I didn't know it existed.
+# JJB: I also implemented it wrong so back to Python's implementation it is.
 def dist(x1, y1, x2, y2):
+    return math.dist([x1, y1], [x2, y2])
     return sqrt(abs(x2-x1)**2 + sqrt(abs(y2-y1))**2)
 
 
@@ -388,15 +397,19 @@ class FieldPanel(wx.Panel):
 
     # Draw a crosshairs on the field center, or what we consider center
     # for all mirror and rotation operations.
-    def _draw_field_center(self, dc, cross_size=100):
-        dc.SetPen(wx.Pen('magenta', 2))
-        sx, sy = self._field_to_screen(-cross_size,
+    def _draw_field_center(self, dc, cross_size=_app_state[CROSSHAIR_LENGTH]):
+        dc.SetPen(wx.Pen('magenta', _app_state[CROSSHAIR_THICKNESS]))
+
+        sx, sy = self._field_to_screen(_app_state[FIELD_X_OFFSET]-cross_size,
                                        _app_state[FIELD_Y_OFFSET])
-        ex, ey = self._field_to_screen(cross_size, _app_state[FIELD_Y_OFFSET])
+
+        ex, ey = self._field_to_screen(_app_state[FIELD_X_OFFSET]+cross_size,
+                                       _app_state[FIELD_Y_OFFSET])
         dc.DrawLine(sx, sy, ex, ey)
         sx, sy = self._field_to_screen(_app_state[FIELD_X_OFFSET],
-                                       -cross_size)
-        ex, ey = self._field_to_screen(_app_state[FIELD_X_OFFSET], cross_size)
+                                       _app_state[FIELD_Y_OFFSET]-cross_size)
+        ex, ey = self._field_to_screen(_app_state[FIELD_X_OFFSET],
+                                       _app_state[FIELD_Y_OFFSET]+cross_size)
         dc.DrawLine(sx, sy, ex, ey)
 
     def _get_screen_waypoints(self):
@@ -409,7 +422,7 @@ class FieldPanel(wx.Panel):
     # click so we know which one the users wishes to operate on.
     # The distance_limit threshold sets a max distance the user can be away
     # from the center of a point before we disregard it.
-    def _find_closest_waypoint(self, x, y, distance_limit=4):
+    def _find_closest_waypoint(self, x, y, distance_limit=_app_state[WAYPOINT_DISTANCE_LIMIT]):
         closest_distance = distance_limit + 1
         closest_waypoint = None
         for w in self.waypoints:
@@ -897,12 +910,12 @@ waypoint_test_json = """
     { "heading": 0, "v": 10, "x": 45.0, "y": -15.0 }
 ]
 """
-if __name__ == '__main__':
+if __name__ == '__maincli__':
     json_str = pp(_app_state)
     print(json_str)
 
 # here's how we fire up the wxPython app
-if __name__ == '__mainx__':
+if __name__ == '__main__':
     # Load up some data for testing so I don't click-click-click each time I
     # start
     objs = json.loads(waypoint_test_json)
