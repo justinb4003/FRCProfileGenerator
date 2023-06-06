@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from datetime import date, time
 import wx
 import json
 import numpy as np
@@ -20,7 +21,7 @@ Waypoint = recordclass('Waypoint', ['x', 'y', 'v', 'heading'])
 # Container class for a step in an overall transformation. Most transformations
 # will be one step but sometimes we'll mirror over X then Y, so, the
 # Transformation class will hold a list of these.
-class TransformationStep(dict):
+class TransformationStep():
     descr: str = ''
     matrix = []
     vector = []
@@ -30,20 +31,31 @@ class TransformationStep(dict):
         self.matrix = matrix
         self.vector = vector
 
+    def __str__(self):
+        return json.dumps(dict(self), ensure_ascii=False)
+
+    def __repr__(self):
+        return self.__str__()
+
 
 # Container class for holding a transformation. This is a path based on
 # our primary one but mirrored or rotated around a center point on the field.
 # Using ChargedUp as an example if your main route was "Red Right" or 'RR'
 # then starting from Red Left might be named RL, Blue Right would be BR, and
 # Blue Left BL.
-class Transformation(dict):
-    name: str = 'unknown'
+class Transformation():
     steps: list[TransformationStep] = []
     visible: bool = True
 
     def __init__(self):
-        self.name = 'unknown'
         self.steps = []
+        self.visible = True
+
+    def __str__(self):
+        return json.dumps(dict(self), ensure_ascii=False)
+
+    def __repr__(self):
+        return self.__str__()
 
 
 # Very routine matrices for mirroring over X or Y axis
@@ -86,11 +98,25 @@ _app_state[TFMS]['BR'].steps = [
 ]
 
 
+def serialize(obj):
+    """JSON serializer for objects not serializable by default json code"""
+
+    if isinstance(obj, date):
+        serial = obj.isoformat()
+        return serial
+
+    if isinstance(obj, time):
+        serial = obj.isoformat()
+        return serial
+
+    return obj.__dict__
+
+
 # Helper function to 'pretty pretty' print a Python object in JSON
 # format.
 def pp(obj):
     print(json.dumps(obj, sort_keys=True, indent=4,
-                     default=lambda o: o.__dict__))
+                     default=serialize))
 
 
 # Made our own distance function instead of using Python's built in
@@ -176,7 +202,6 @@ def rotation_matrix(deg=None, rad=None):
     else:
         theta = rad
     return np.array([[cos(theta), -sin(theta)], [sin(theta), cos(theta)]])
-
 
 
 # A wx Panel that holds the Field drawing portion of the UI
@@ -418,7 +443,8 @@ class FieldPanel(wx.Panel):
                 vec -= np.array([_app_state[FIELD_X_OFFSET],
                                  _app_state[FIELD_Y_OFFSET]])
                 vec = np.dot(mtx, vec)
-                vec += np.array([_app_state[FIELD_X_OFFSET], _app_state[FIELD_Y_OFFSET]])
+                vec += np.array([_app_state[FIELD_X_OFFSET],
+                                 _app_state[FIELD_Y_OFFSET]])
                 vec += trans_vec
                 x, y = self._field_to_screen(vec[0], vec[1])
                 self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
@@ -871,9 +897,12 @@ waypoint_test_json = """
     { "heading": 0, "v": 10, "x": 45.0, "y": -15.0 }
 ]
 """
+if __name__ == '__main__':
+    json_str = pp(_app_state)
+    print(json_str)
 
 # here's how we fire up the wxPython app
-if __name__ == '__main__':
+if __name__ == '__mainx__':
     # Load up some data for testing so I don't click-click-click each time I
     # start
     objs = json.loads(waypoint_test_json)
