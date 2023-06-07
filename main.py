@@ -9,16 +9,32 @@ import numpy as np
 
 from copy import deepcopy
 from math import sqrt, cos, sin, radians
-from recordclass import recordclass
 from wx.lib.splitter import MultiSplitterWindow
 
 # Using flake8 for linting
+
 
 # Define a type that can hold a waypoint's data.
 # You can think of this like a C struct, POJO (Plain Old Java Object)
 # POCO (Plain old C# Object) or as if we defined an actual Python
 # class for this, but this is much shorter and simpler.
-Waypoint = recordclass('Waypoint', ['x', 'y', 'v', 'heading'])
+class Waypoint():
+    x: float = 0.0
+    y: float = 0.0
+    v: float = 0.0
+    heading: float = 0.0
+
+    def __init__(self, x, y, v, heading):
+        self.x = x
+        self.y = y
+        self.v = v
+        self.heading = heading
+
+    def __str__(self):
+        return json.dumps(dict(self), ensure_ascii=False)
+
+    def __repr__(self):
+        return self.__str__()
 
 
 # Container class for a step in an overall transformation. Most transformations
@@ -74,6 +90,7 @@ FIELD_Y_OFFSET = 'field_y_offset'
 WAYPOINT_DISTANCE_LIMIT = 'waypoint_select_distance_limit'
 CROSSHAIR_LENGTH = 'crosshair_length'
 CROSSHAIR_THICKNESS = 'crosshair_thickness'
+WAYPOINTS = 'waypoints'
 
 TFMS = 'transformations'
 
@@ -84,6 +101,7 @@ _app_state = {
     WAYPOINT_DISTANCE_LIMIT: 15,
     CROSSHAIR_LENGTH: 50,
     CROSSHAIR_THICKNESS: 10,
+    WAYPOINTS: [],
     TFMS: {},
 }
 
@@ -105,6 +123,19 @@ _app_state[TFMS]['BR'].steps = [
     TransformationStep('Mirror X', MIRROR_X_MATRIX, None),
     TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
 ]
+
+
+def modifies_state(func):
+    def wrapper(*args, **kwargs):
+        func(*args, **kwargs)
+        store_app_state()
+    return wrapper
+
+
+def store_app_state():
+    print('saving state')
+    with open('app_state.json', 'w') as f:
+        json.dump(_app_state, f, default=serialize)
 
 
 def resource_path(relative_path):
@@ -234,7 +265,7 @@ class FieldPanel(wx.Panel):
     def __init__(self, parent):
         # This will be a list of 'Waypoint' type recordclass objects
         # ordered by their position on the path
-        self.waypoints = []
+
         # We need to hang onto a reference to the control panel's elemnts
         # because the app needs to send data over to them now and again
         # likewise the control panel object has a reference to this field panel
@@ -317,6 +348,7 @@ class FieldPanel(wx.Panel):
 
     # Clicking on the field can either select or add a node depending
     # on where it happens.
+    @modifies_state
     def on_field_click(self, evt):
         x, y = evt.GetPosition()
         fieldx, fieldy = self._screen_to_field(x, y)
@@ -369,7 +401,7 @@ class FieldPanel(wx.Panel):
                         final_vector += np.array(s.vector)
                     else:
                         print('unhandled ?')
-            points = np.array([[w.x, w.y] for w in self.waypoints])
+            points = np.array([[w.x, w.y] for w in _app_state[WAYPOINTS]])
             points -= np.array([_app_state[FIELD_X_OFFSET],
                                 _app_state[FIELD_Y_OFFSET]])
             points = np.array(
@@ -428,7 +460,7 @@ class FieldPanel(wx.Panel):
     def _get_screen_waypoints(self):
         return [
             Waypoint(self._field_to_screen(x, y), 10, 0)
-            for x, y in self.waypoints
+            for x, y in _app_state[WAYPOINTS]
         ]
 
     # When a click on the field occurs we locate the waypoint closest to that
@@ -441,7 +473,7 @@ class FieldPanel(wx.Panel):
             ):
         closest_distance = distance_limit + 1
         closest_waypoint = None
-        for w in self.waypoints:
+        for w in _app_state[WAYPOINTS]:
             d = dist(x, y, w.x, w.y)
             if d < distance_limit and d < closest_distance:
                 closest_distance = d
@@ -458,7 +490,7 @@ class FieldPanel(wx.Panel):
         if self.control_panel and self.control_panel.draw_field_center:
             self._draw_field_center(dc)
 
-        for idx, w in enumerate(self.waypoints):
+        for idx, w in enumerate(_app_state[WAYPOINTS]):
             self._draw_orig_waypoint(dc, w, idx)
             for t in _app_state[TFMS].values():
                 if not t.visible:
@@ -480,7 +512,7 @@ class FieldPanel(wx.Panel):
                 x, y = self._field_to_screen(vec[0], vec[1])
                 self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
 
-        if len(self.waypoints) > 2:
+        if len(_app_state[WAYPOINTS]) > 2:
             self._draw_path(dc)
 
         del dc
@@ -498,12 +530,12 @@ class FieldPanel(wx.Panel):
         # Find two nodes that makes the shortest triangle
         shortest_combo = (None, None)
         shortest_height = 100000
-        for w1 in self.waypoints:
-            for w2 in self.waypoints:
+        for w1 in _app_state[WAYPOINTS]:
+            for w2 in _app_state[WAYPOINTS]:
                 if w1 == w2:
                     continue
-                w1_idx = self.waypoints.index(w1)
-                w2_idx = self.waypoints.index(w2)
+                w1_idx = _app_state[WAYPOINTS].index(w1)
+                w2_idx = _app_state[WAYPOINTS].index(w2)
                 if abs(w1_idx - w2_idx) > 1:
                     continue
                 h = triangle_height(w1, w2, new_waypoint)
@@ -512,25 +544,17 @@ class FieldPanel(wx.Panel):
                     shortest_combo = (w1, w2)
         print('Shortest height', shortest_height)
         print('Shortest combo', shortest_combo)
-        print(self.waypoints.index(shortest_combo[0]),
-              self.waypoints.index(shortest_combo[1]))
+        print(_app_state[WAYPOINTS].index(shortest_combo[0]),
+              _app_state[WAYPOINTS].index(shortest_combo[1]))
         if shortest_height < 4:
-            idx = max(self.waypoints.index(shortest_combo[0]),
-                      self.waypoints.index(shortest_combo[1]))
-            self.waypoints.insert(idx, new_waypoint)
+            idx = max(_app_state[WAYPOINTS].index(shortest_combo[0]),
+                      _app_state[WAYPOINTS].index(shortest_combo[1]))
+            _app_state[WAYPOINTS].insert(idx, new_waypoint)
         else:
-            self.waypoints.append(new_waypoint)
+            _app_state[WAYPOINTS].append(new_waypoint)
         self._selected_node = new_waypoint
         self.control_panel.select_waypoint(new_waypoint)
         self.redraw()
-        if False:
-            outdata = [fieldx._asdict() for fieldx in self.waypoints]
-            print('dumpping', outdata)
-            print(
-                json.dumps(outdata,
-                           sort_keys=True, indent=4)
-            )
-        pass
 
     # Delete the closest waypoint to the click
     # Or if we're not on a waypoint add one here between
@@ -541,16 +565,16 @@ class FieldPanel(wx.Panel):
         self.control_panel.select_waypoint(None)
         delnode = self._find_closest_waypoint(x, y)
         if delnode is not None:
-            self.waypoints.remove(delnode)
+            _app_state[WAYPOINTS].remove(delnode)
         else:
             # Add waypoint between endpoints of closest spline
             # TODO: Figure out how to find closest spline
             spline_start = self.find_closest_spline(x, y)
             if spline_start is not None:
-                start_index = self.waypoints.index(spline_start)
+                start_index = _app_state[WAYPOINTS].index(spline_start)
                 fieldx, fieldy = self._screen_to_field(x, y)
                 w = Waypoint(fieldx, fieldy, 10, 0)
-                self.waypoints.insert(start_index+1, w)
+                _app_state[WAYPOINTS].insert(start_index+1, w)
         self.redraw()
 
     # select the closest waypoint to the click for modification
@@ -706,7 +730,7 @@ class ControlPanel(wx.Panel):
 
     # TODO: Not complete at all yet.
     def export_profile(self, evt):
-        buildit(self.field_panel.waypoints)
+        buildit(_app_state[WAYPOINTS])
         wx.MessageDialog(
             parent=None, message='Data exported to clipoboard'
         ).ShowModal()
@@ -909,7 +933,8 @@ class MainWindow(wx.Frame):
         self.Destroy()
 
     def set_waypoints(self, waypoints):
-        self.field_panel.waypoints = waypoints
+        global _app_state
+        _app_state[WAYPOINTS] = waypoints
         self.field_panel.redraw()
 
 
