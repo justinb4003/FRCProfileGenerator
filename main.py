@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from datetime import date, time
+import os
 import wx
+import sys
 import json
 import math
 import numpy as np
@@ -103,6 +105,15 @@ _app_state[TFMS]['BR'].steps = [
     TransformationStep('Mirror X', MIRROR_X_MATRIX, None),
     TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
 ]
+
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 
 def serialize(obj):
@@ -232,7 +243,9 @@ class FieldPanel(wx.Panel):
         # The BoxSizer is a layout manager that arranges the controls in a box
         hbox = wx.BoxSizer(wx.VERTICAL)
         # Load in the field image
-        field = wx.Image(_app_state[FIELD_BACKGROUND_IMAGE],
+        imgname = _app_state[FIELD_BACKGROUND_IMAGE]
+        imgpath = resource_path(imgname)
+        field = wx.Image(imgpath,
                          wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         self.w = field.GetWidth()
         self.h = field.GetHeight()
@@ -422,7 +435,10 @@ class FieldPanel(wx.Panel):
     # click so we know which one the users wishes to operate on.
     # The distance_limit threshold sets a max distance the user can be away
     # from the center of a point before we disregard it.
-    def _find_closest_waypoint(self, x, y, distance_limit=_app_state[WAYPOINT_DISTANCE_LIMIT]):
+    def _find_closest_waypoint(
+            self, x, y,
+            distance_limit=_app_state[WAYPOINT_DISTANCE_LIMIT],
+            ):
         closest_distance = distance_limit + 1
         closest_waypoint = None
         for w in self.waypoints:
@@ -434,7 +450,9 @@ class FieldPanel(wx.Panel):
 
     # Draw all waypoints and paths on the field
     def redraw(self):
-        field_blank = wx.Image(_app_state[FIELD_BACKGROUND_IMAGE],
+        imgname = _app_state[FIELD_BACKGROUND_IMAGE]
+        imgpath = resource_path(imgname)
+        field_blank = wx.Image(imgpath,
                                wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
         if self.control_panel and self.control_panel.draw_field_center:
