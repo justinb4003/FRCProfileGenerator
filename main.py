@@ -142,6 +142,8 @@ def get_app_state():
             obj = jsonpickle.decode(f.read())
     except json.decoder.JSONDecodeError:
         obj = None
+    except FileNotFoundError:
+        obj = None
     return obj
 
 
