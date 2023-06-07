@@ -10,6 +10,7 @@ import numpy as np
 
 from copy import deepcopy
 from math import sqrt, cos, sin, radians
+from typing import List
 from wx.lib.splitter import MultiSplitterWindow
 
 # Using flake8 for linting
@@ -64,7 +65,7 @@ class TransformationStep():
 # then starting from Red Left might be named RL, Blue Right would be BR, and
 # Blue Left BL.
 class Transformation():
-    steps: list[TransformationStep] = []
+    steps: List[TransformationStep] = []
     visible: bool = True
 
     def __init__(self):
