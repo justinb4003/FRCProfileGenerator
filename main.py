@@ -5,6 +5,7 @@ import wx
 import sys
 import json
 import math
+import jsonpickle
 import numpy as np
 
 from copy import deepcopy
@@ -78,9 +79,9 @@ class Transformation():
 
 
 # Very routine matrices for mirroring over X or Y axis
-MIRROR_X_MATRIX = [[-1, 0],
+MIRROR_Y_MATRIX = [[-1, 0],
                    [ 0, 1]]  # noqa
-MIRROR_Y_MATRIX = [[1,  0],
+MIRROR_X_MATRIX = [[1,  0],
                    [0, -1]]
 
 
@@ -94,35 +95,38 @@ WAYPOINTS = 'waypoints'
 
 TFMS = 'transformations'
 
-_app_state = {
-    FIELD_BACKGROUND_IMAGE: 'field_charged_up.png',
-    FIELD_X_OFFSET: 0,
-    FIELD_Y_OFFSET: 52,
-    WAYPOINT_DISTANCE_LIMIT: 15,
-    CROSSHAIR_LENGTH: 50,
-    CROSSHAIR_THICKNESS: 10,
-    WAYPOINTS: [],
-    TFMS: {},
-}
 
-_app_state[TFMS] = {
-    'RL': Transformation(),
-    'BR': Transformation(),
-    'BL': Transformation(),
-}
+def get_default_app_state():
+    state = {
+        FIELD_BACKGROUND_IMAGE: 'field_charged_up.png',
+        FIELD_X_OFFSET: 0,
+        FIELD_Y_OFFSET: 52,
+        WAYPOINT_DISTANCE_LIMIT: 15,
+        CROSSHAIR_LENGTH: 50,
+        CROSSHAIR_THICKNESS: 10,
+        WAYPOINTS: [],
+        TFMS: {},
+    }
 
-_app_state[TFMS]['RL'].steps = [
-    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
-]
+    state[TFMS] = {
+        'RL': Transformation(),
+        'BR': Transformation(),
+        'BL': Transformation(),
+    }
 
-_app_state[TFMS]['BL'].steps = [
-    TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
-]
+    state[TFMS]['RL'].steps = [
+        TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
+    ]
 
-_app_state[TFMS]['BR'].steps = [
-    TransformationStep('Mirror X', MIRROR_X_MATRIX, None),
-    TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
-]
+    state[TFMS]['BL'].steps = [
+        TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
+    ]
+
+    state[TFMS]['BR'].steps = [
+        TransformationStep('Mirror X', MIRROR_X_MATRIX, None),
+        TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
+    ]
+    return state
 
 
 def modifies_state(func):
@@ -132,10 +136,19 @@ def modifies_state(func):
     return wrapper
 
 
+def get_app_state():
+    try:
+        with open('app_state.json', 'r') as f:
+            obj = jsonpickle.decode(f.read())
+    except json.decoder.JSONDecodeError:
+        obj = None
+    return obj
+
+
 def store_app_state():
-    print('saving state')
+    json_str = jsonpickle.encode(_app_state)
     with open('app_state.json', 'w') as f:
-        json.dump(_app_state, f, default=serialize)
+        f.write(json_str)
 
 
 def resource_path(relative_path):
@@ -262,14 +275,12 @@ class FieldPanel(wx.Panel):
     # Node that we're near enough to to highlight
     _highlight_node = None
 
-    def __init__(self, parent):
-        # This will be a list of 'Waypoint' type recordclass objects
-        # ordered by their position on the path
+    control_panel = None
 
+    def __init__(self, parent):
         # We need to hang onto a reference to the control panel's elemnts
         # because the app needs to send data over to them now and again
         # likewise the control panel object has a reference to this field panel
-        self.control_panel = None
         wx.Panel.__init__(self, parent=parent)
         # The BoxSizer is a layout manager that arranges the controls in a box
         hbox = wx.BoxSizer(wx.VERTICAL)
@@ -296,6 +307,7 @@ class FieldPanel(wx.Panel):
         self.redraw()
 
     # Event fires any time the mouse moves on the field drawing
+    @modifies_state
     def on_mouse_move(self, event):
         x, y = event.GetPosition()
         fieldx, fieldy = self._screen_to_field(x, y)
@@ -348,12 +360,13 @@ class FieldPanel(wx.Panel):
 
     # Clicking on the field can either select or add a node depending
     # on where it happens.
-    @modifies_state
     def on_field_click(self, evt):
         x, y = evt.GetPosition()
         fieldx, fieldy = self._screen_to_field(x, y)
         # print(f'Clicky hit at {x},{y}')
-        selnode = self._find_closest_waypoint(fieldx, fieldy)
+        selnode = self._find_closest_waypoint(
+                fieldx, fieldy, _app_state[WAYPOINT_DISTANCE_LIMIT]
+            )
         if selnode is None:
             self.add_node(fieldx, fieldy)
         else:
@@ -431,7 +444,9 @@ class FieldPanel(wx.Panel):
                 ctl1 = wx.Point2D(x1, y1)
                 ctl2 = wx.Point2D(x2, y2)
                 endP = wx.Point2D(endx, endy)
-                if self.control_panel.show_control_points:
+                if self.control_panel is not None \
+                   and \
+                   self.control_panel.show_control_points:
                     # TODO: Figure out how I broke the color on control points
                     gc.SetPen(wx.Pen('blue', 2))
                     dc.DrawCircle(int(ctl1.x), int(ctl1.y), 2)
@@ -442,7 +457,7 @@ class FieldPanel(wx.Panel):
 
     # Draw a crosshairs on the field center, or what we consider center
     # for all mirror and rotation operations.
-    def _draw_field_center(self, dc, cross_size=_app_state[CROSSHAIR_LENGTH]):
+    def _draw_field_center(self, dc, cross_size=5):
         dc.SetPen(wx.Pen('magenta', _app_state[CROSSHAIR_THICKNESS]))
 
         sx, sy = self._field_to_screen(_app_state[FIELD_X_OFFSET]-cross_size,
@@ -469,7 +484,7 @@ class FieldPanel(wx.Panel):
     # from the center of a point before we disregard it.
     def _find_closest_waypoint(
             self, x, y,
-            distance_limit=_app_state[WAYPOINT_DISTANCE_LIMIT],
+            distance_limit=15,
             ):
         closest_distance = distance_limit + 1
         closest_waypoint = None
@@ -488,7 +503,7 @@ class FieldPanel(wx.Panel):
                                wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
         if self.control_panel and self.control_panel.draw_field_center:
-            self._draw_field_center(dc)
+            self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
         for idx, w in enumerate(_app_state[WAYPOINTS]):
             self._draw_orig_waypoint(dc, w, idx)
@@ -519,37 +534,41 @@ class FieldPanel(wx.Panel):
         self.field_bmp.SetBitmap(field_blank)
 
     # Adds a new waypoint
+    @modifies_state
     def add_node(self, fieldx, fieldy):
+        global _app_state
         print(f'Add node at {fieldx}, {fieldy}')
         # Defaulting velocity and headings for now.
         new_waypoint = Waypoint(x=fieldx, y=fieldy, v=10, heading=0)
 
         # Check to see if we need to insert it between two
         # Poor implementation for now
-
-        # Find two nodes that makes the shortest triangle
-        shortest_combo = (None, None)
-        shortest_height = 100000
-        for w1 in _app_state[WAYPOINTS]:
-            for w2 in _app_state[WAYPOINTS]:
-                if w1 == w2:
-                    continue
-                w1_idx = _app_state[WAYPOINTS].index(w1)
-                w2_idx = _app_state[WAYPOINTS].index(w2)
-                if abs(w1_idx - w2_idx) > 1:
-                    continue
-                h = triangle_height(w1, w2, new_waypoint)
-                if h < shortest_height:
-                    shortest_height = h
-                    shortest_combo = (w1, w2)
-        print('Shortest height', shortest_height)
-        print('Shortest combo', shortest_combo)
-        print(_app_state[WAYPOINTS].index(shortest_combo[0]),
-              _app_state[WAYPOINTS].index(shortest_combo[1]))
-        if shortest_height < 4:
-            idx = max(_app_state[WAYPOINTS].index(shortest_combo[0]),
-                      _app_state[WAYPOINTS].index(shortest_combo[1]))
-            _app_state[WAYPOINTS].insert(idx, new_waypoint)
+        if len(_app_state[WAYPOINTS]) >= 2:
+            # Find two nodes that makes the shortest triangle
+            shortest_combo = (None, None)
+            shortest_height = 100000
+            for w1 in _app_state[WAYPOINTS]:
+                for w2 in _app_state[WAYPOINTS]:
+                    if w1 == w2:
+                        continue
+                    w1_idx = _app_state[WAYPOINTS].index(w1)
+                    w2_idx = _app_state[WAYPOINTS].index(w2)
+                    if abs(w1_idx - w2_idx) > 1:
+                        continue
+                    h = triangle_height(w1, w2, new_waypoint)
+                    if h < shortest_height:
+                        shortest_height = h
+                        shortest_combo = (w1, w2)
+            # print('Shortest height', shortest_height)
+            # print('Shortest combo', shortest_combo)
+            print(_app_state[WAYPOINTS].index(shortest_combo[0]),
+                  _app_state[WAYPOINTS].index(shortest_combo[1]))
+            if shortest_height < 4:
+                idx = max(_app_state[WAYPOINTS].index(shortest_combo[0]),
+                          _app_state[WAYPOINTS].index(shortest_combo[1]))
+                _app_state[WAYPOINTS].insert(idx, new_waypoint)
+            else:
+                _app_state[WAYPOINTS].append(new_waypoint)
         else:
             _app_state[WAYPOINTS].append(new_waypoint)
         self._selected_node = new_waypoint
@@ -559,7 +578,9 @@ class FieldPanel(wx.Panel):
     # Delete the closest waypoint to the click
     # Or if we're not on a waypoint add one here between
     # the start and end points of this spline
+    @modifies_state
     def del_node(self, x, y):
+        global _app_state
         print(f'Del node at {x}, {y}')
         self._selected_node = None
         self.control_panel.select_waypoint(None)
@@ -715,6 +736,7 @@ class ControlPanel(wx.Panel):
         self.update_transform_display()
         self.field_panel.redraw()
 
+    @modifies_state
     def add_transformation(self, evt):
         # Make a dialog now?
         global _app_state
@@ -757,6 +779,7 @@ class ControlPanel(wx.Panel):
 
         self.active_waypoint = waypoint
 
+    @modifies_state
     def on_field_offset_change(self, evt):
         print('offset change')
         global _app_state
@@ -803,6 +826,7 @@ class TransformDialog(wx.Dialog):
     def __init__(self, *args, **kw):
         super(TransformDialog, self).__init__(*args, **kw)
 
+        self._transformation = Transformation()
         self._stepbox: wx.BoxSizer = wx.BoxSizer(wx.VERTICAL)
         transform_lbl = wx.StaticText(self, label='Transformation Name')
         self.transform_name_txt = wx.TextCtrl(self)
@@ -869,18 +893,12 @@ class TransformDialog(wx.Dialog):
     def add_step(self, evt):
         s = None
         if self.mirrorX_rad.GetValue():
-            s = TransformationStep('Mirror X',
-                                   [[-1, 0],
-                                    [ 0, 1]], None)  # noqa
+            s = TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
         elif self.mirrorY_rad.GetValue():
-            s = TransformationStep('Mirror Y',
-                                   [[1,  0],
-                                    [0, -1]], None)
+            s = TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None)
         elif self.rotate_rad.GetValue():
             rads = radians(float(self.rotate_txt.GetValue()))
-            s = TransformationStep('Rotate',
-                                   [[cos(rads), -sin(rads)],
-                                    [sin(rads), cos(rads)]], None)
+            s = TransformationStep('Rotate', rotation_matrix(rad=rads), None)
 
         self._transformation.steps.append(deepcopy(s))
         self.update_steps_display()
@@ -959,16 +977,12 @@ if __name__ == '__maincli__':
 
 # here's how we fire up the wxPython app
 if __name__ == '__main__':
-    # Load up some data for testing so I don't click-click-click each time I
-    # start
-    objs = json.loads(waypoint_test_json)
-    waypoints = []
-    for o in objs:
-        w = Waypoint(o['x'], o['y'], o['v'], o['heading'])
-        waypoints.append(w)
+    newstate = get_app_state()
+    if newstate is not None:
+        _app_state = newstate
+    else:
+        _app_state = get_default_app_state()
     app = wx.App()
     frame = MainWindow(parent=None, id=-1)
     frame.Show()
-    # Use the testing data we loaded.
-    frame.set_waypoints(waypoints)
     app.MainLoop()
