@@ -285,8 +285,6 @@ class FieldPanel(wx.Panel):
         # because the app needs to send data over to them now and again
         # likewise the control panel object has a reference to this field panel
         wx.Panel.__init__(self, parent=parent)
-        # The BoxSizer is a layout manager that arranges the controls in a box
-        hbox = wx.BoxSizer(wx.VERTICAL)
         # Load in the field image
         imgname = _app_state[FIELD_BACKGROUND_IMAGE]
         imgpath = resource_path(imgname)
@@ -304,8 +302,38 @@ class FieldPanel(wx.Panel):
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
         self.field_bmp.Bind(wx.EVT_RIGHT_DOWN, self.on_field_click_right)
         self.field_bmp.Bind(wx.EVT_MOTION, self.on_mouse_move)
-        hbox.Add(self.field_bmp, 0, wx.EXPAND | wx.ALL)
-        self.SetSizer(hbox)
+
+        # Establish controls for modifying the field properties
+        # Much like the buttons we create labels and text editing boxes
+        field_offset_x_lbl = wx.StaticText(self, label='Field Offset X')
+        self.field_offset_x_txt = wx.TextCtrl(self)
+        self.field_offset_x_txt.ChangeValue(str(_app_state[FIELD_X_OFFSET]))
+        field_offset_y_lbl = wx.StaticText(self, label='Field Offset Y')
+        self.field_offset_y_txt = wx.TextCtrl(self)
+        self.field_offset_y_txt.ChangeValue(str(_app_state[FIELD_Y_OFFSET]))
+
+        self.field_offset_x_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
+        self.field_offset_y_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
+
+        # The BoxSizer is a layout manager that arranges the controls in a box
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        vbox.Add(self.field_bmp, 0, wx.EXPAND | wx.ALL)
+        border = 5
+
+        hbox = wx.BoxSizer(wx.HORIZONTAL)
+        xbox = wx.BoxSizer(wx.VERTICAL)
+        xbox.Add(field_offset_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        xbox.Add(self.field_offset_x_txt, 0, wx.EXPAND | wx.ALL, border=border)
+
+        ybox = wx.BoxSizer(wx.VERTICAL)
+        ybox.Add(field_offset_y_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        ybox.Add(self.field_offset_y_txt, 0, wx.EXPAND | wx.ALL, border=border)
+
+        hbox.Add(xbox)
+        hbox.Add(ybox)
+        vbox.Add(hbox)
+
+        self.SetSizer(vbox)
         self.Fit()
         self.redraw()
 
@@ -354,6 +382,15 @@ class FieldPanel(wx.Panel):
         x += 640
         y += 300
         return int(x), int(y)
+
+    @modifies_state
+    def on_field_offset_change(self, evt):
+        print('offset change')
+        global _app_state
+        _app_state[FIELD_X_OFFSET] = float(self.field_offset_x_txt.GetValue())
+        _app_state[FIELD_Y_OFFSET] = float(self.field_offset_y_txt.GetValue())
+        self.redraw()
+        return
 
     # We use the right click to delete a node that's close to the click
     def on_field_click_right(self, evt):
@@ -634,14 +671,6 @@ class ControlPanel(wx.Panel):
         show_control_points_btn.SetValue(self.show_control_points)
         draw_field_center_btn.SetValue(self.draw_field_center)
 
-        # Much like the buttons we create labels and text editing boxes
-        field_offset_x_lbl = wx.StaticText(self, label='Field Offset X')
-        self.field_offset_x_txt = wx.TextCtrl(self)
-        self.field_offset_x_txt.ChangeValue(str(_app_state[FIELD_X_OFFSET]))
-        field_offset_y_lbl = wx.StaticText(self, label='Field Offset Y')
-        self.field_offset_y_txt = wx.TextCtrl(self)
-        self.field_offset_y_txt.ChangeValue(str(_app_state[FIELD_Y_OFFSET]))
-
         routine_name_lbl = wx.StaticText(self, label='Routine Name')
         self.routine_ddl = wx.ListCtrl(self, style=wx.LC_REPORT)
         self.routine_ddl.AppendColumn('Routine Name')
@@ -674,8 +703,6 @@ class ControlPanel(wx.Panel):
                                    self.toggle_draw_field_center)
         show_control_points_btn.Bind(wx.EVT_CHECKBOX,
                                      self.toggle_control_points)
-        self.field_offset_x_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
-        self.field_offset_y_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
         self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_y.Bind(wx.EVT_TEXT, self.on_waypoint_change)
@@ -687,10 +714,6 @@ class ControlPanel(wx.Panel):
         # display finally.
         hbox = wx.BoxSizer(wx.VERTICAL)
         border = 5
-        hbox.Add(field_offset_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(self.field_offset_x_txt, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(field_offset_y_lbl, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(self.field_offset_y_txt, 0, wx.EXPAND | wx.ALL, border=border)
 
         hbox.Add(routine_name_lbl, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(self.routine_ddl, 0, wx.EXPAND | wx.ALL, border=border)
@@ -799,15 +822,6 @@ class ControlPanel(wx.Panel):
             self.waypoint_heading.ChangeValue('')
 
         self.active_waypoint = waypoint
-
-    @modifies_state
-    def on_field_offset_change(self, evt):
-        print('offset change')
-        global _app_state
-        _app_state[FIELD_X_OFFSET] = float(self.field_offset_x_txt.GetValue())
-        _app_state[FIELD_Y_OFFSET] = float(self.field_offset_y_txt.GetValue())
-        self.field_panel.redraw()
-        return
 
     def on_waypoint_change(self, evt):
         if self.active_waypoint is None:
@@ -958,14 +972,6 @@ class MainWindow(wx.Frame):
         # Window dressings like status and menu bars; not wired to anything
         status_bar = self.CreateStatusBar()
         menubar_main = wx.MenuBar()
-        file_menu = wx.Menu()
-        edit_menu = wx.Menu()
-        file_menu.Append(wx.NewIdRef(),
-                         'Open Profile...',
-                         'Open an existing profile')
-        file_menu.Append(wx.NewIdRef(), 'Close', 'Quit the application')
-        menubar_main.Append(file_menu, 'File')
-        menubar_main.Append(edit_menu, 'Edit')
         self.SetMenuBar(menubar_main)
         self.SetStatusBar(status_bar)
 
@@ -993,9 +999,6 @@ waypoint_test_json = """
     { "heading": 0, "v": 10, "x": 45.0, "y": -15.0 }
 ]
 """
-if __name__ == '__maincli__':
-    json_str = pp(_app_state)
-    print(json_str)
 
 # here's how we fire up the wxPython app
 if __name__ == '__main__':
