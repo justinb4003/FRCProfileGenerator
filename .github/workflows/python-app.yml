@@ -8,7 +8,7 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  build-win:
 
     runs-on: ubuntu-latest
 
@@ -24,3 +24,20 @@ jobs:
       with:
         name: FRCProfileGenerator-Windows
         path: ./dist/windows
+  
+  build-linux:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Package Application
+      uses: JackMcKew/pyinstaller-action-linux@main
+      with:
+        path: ./
+
+    - uses: actions/upload-artifact@v2
+      with:
+        name: FRCProfileGenerator-Linux
+        path: ./dist/linux
