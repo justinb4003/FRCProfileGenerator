@@ -932,6 +932,7 @@ class MainWindow(wx.Frame):
         self.control_panel = ControlPanel(self.splitter)
         self.field_panel = FieldPanel(self.splitter)
         self.field_panel.control_panel = self.control_panel
+        self.field_panel.redraw()
         self.control_panel.field_panel = self.field_panel
         self.splitter.AppendWindow(self.field_panel,
                                    sashPos=self.field_panel.w)
