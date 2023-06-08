@@ -642,6 +642,20 @@ class ControlPanel(wx.Panel):
         self.field_offset_y_txt = wx.TextCtrl(self)
         self.field_offset_y_txt.ChangeValue(str(_app_state[FIELD_Y_OFFSET]))
 
+        routine_name_lbl = wx.StaticText(self, label='Routine Name')
+        self.routine_ddl = wx.ListCtrl(self, style=wx.LC_REPORT)
+        self.routine_ddl.AppendColumn('Routine Name')
+        choices = [
+            'Routine 1',
+            'Routine 2',
+            'Routine 3',
+            'Routine 4',
+            'Routine 5',
+        ]
+
+        for c in choices:
+            self.routine_ddl.InsertStringItem(sys.maxsize, c)
+
         waypoint_x_lbl = wx.StaticText(self, label='Selected Waypoint X')
         self.waypoint_x = wx.TextCtrl(self)
         waypoint_y_lbl = wx.StaticText(self, label='Selected Waypoint Y')
@@ -677,6 +691,10 @@ class ControlPanel(wx.Panel):
         hbox.Add(self.field_offset_x_txt, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(field_offset_y_lbl, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(self.field_offset_y_txt, 0, wx.EXPAND | wx.ALL, border=border)
+
+        hbox.Add(routine_name_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(self.routine_ddl, 0, wx.EXPAND | wx.ALL, border=border)
+
         hbox.Add(waypoint_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(self.waypoint_x, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(waypoint_y_lbl, 0, wx.EXPAND | wx.ALL, border=border)
