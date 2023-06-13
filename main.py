@@ -79,6 +79,22 @@ class Transformation():
         return self.__str__()
 
 
+class Routine():
+    name: str = ''
+    waypoints: List[Waypoint] = []
+    active_transformations: List[str] = []
+
+    def __str__(self):
+        return json.dumps(dict(self), ensure_ascii=False)
+
+    def __repr__(self):
+        return self.__str__()
+
+
+def _current_waypoints():
+    return _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints
+
+
 # Very routine matrices for mirroring over X or Y axis
 MIRROR_Y_MATRIX = [[-1, 0],
                    [ 0, 1]]  # noqa
@@ -92,9 +108,9 @@ FIELD_Y_OFFSET = 'field_y_offset'
 WAYPOINT_DISTANCE_LIMIT = 'waypoint_select_distance_limit'
 CROSSHAIR_LENGTH = 'crosshair_length'
 CROSSHAIR_THICKNESS = 'crosshair_thickness'
-WAYPOINTS = 'waypoints'
-
+ROUTINES = 'routines'
 TFMS = 'transformations'
+CURRENT_ROUTINE = 'current_routine'
 
 
 def get_default_app_state():
@@ -105,9 +121,12 @@ def get_default_app_state():
         WAYPOINT_DISTANCE_LIMIT: 15,
         CROSSHAIR_LENGTH: 50,
         CROSSHAIR_THICKNESS: 10,
-        WAYPOINTS: [],
+        ROUTINES: {},
+        CURRENT_ROUTINE: 'Pick One',
         TFMS: {},
     }
+
+    state[ROUTINES]['Pick One'] = Routine()
 
     state[TFMS] = {
         'RL': Transformation(),
@@ -454,7 +473,7 @@ class FieldPanel(wx.Panel):
                         final_vector += np.array(s.vector)
                     else:
                         print('unhandled ?')
-            points = np.array([[w.x, w.y] for w in _app_state[WAYPOINTS]])
+            points = np.array([[w.x, w.y] for w in _current_waypoints()])
             points -= np.array([_app_state[FIELD_X_OFFSET],
                                 _app_state[FIELD_Y_OFFSET]])
             points = np.array(
@@ -515,7 +534,7 @@ class FieldPanel(wx.Panel):
     def _get_screen_waypoints(self):
         return [
             Waypoint(self._field_to_screen(x, y), 10, 0)
-            for x, y in _app_state[WAYPOINTS]
+            for x, y in _current_waypoints()
         ]
 
     # When a click on the field occurs we locate the waypoint closest to that
@@ -528,7 +547,7 @@ class FieldPanel(wx.Panel):
             ):
         closest_distance = distance_limit + 1
         closest_waypoint = None
-        for w in _app_state[WAYPOINTS]:
+        for w in _current_waypoints():
             d = dist(x, y, w.x, w.y)
             if d < distance_limit and d < closest_distance:
                 closest_distance = d
@@ -545,7 +564,7 @@ class FieldPanel(wx.Panel):
         if self.control_panel and self.control_panel.draw_field_center:
             self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
-        for idx, w in enumerate(_app_state[WAYPOINTS]):
+        for idx, w in enumerate(_current_waypoints()):
             self._draw_orig_waypoint(dc, w, idx)
             for t in _app_state[TFMS].values():
                 if not t.visible:
@@ -567,7 +586,7 @@ class FieldPanel(wx.Panel):
                 x, y = self._field_to_screen(vec[0], vec[1])
                 self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
 
-        if len(_app_state[WAYPOINTS]) > 2:
+        if len(_current_waypoints()) > 2:
             self._draw_path(dc)
 
         del dc
@@ -583,16 +602,17 @@ class FieldPanel(wx.Panel):
 
         # Check to see if we need to insert it between two
         # Poor implementation for now
-        if len(_app_state[WAYPOINTS]) >= 2:
+        waypoints = _current_waypoints()
+        if len(waypoints) >= 2:
             # Find two nodes that makes the shortest triangle
             shortest_combo = (None, None)
             shortest_height = 100000
-            for w1 in _app_state[WAYPOINTS]:
-                for w2 in _app_state[WAYPOINTS]:
+            for w1 in waypoints:
+                for w2 in waypoints:
                     if w1 == w2:
                         continue
-                    w1_idx = _app_state[WAYPOINTS].index(w1)
-                    w2_idx = _app_state[WAYPOINTS].index(w2)
+                    w1_idx = waypoints.index(w1)
+                    w2_idx = waypoints.index(w2)
                     if abs(w1_idx - w2_idx) > 1:
                         continue
                     h = triangle_height(w1, w2, new_waypoint)
@@ -601,16 +621,17 @@ class FieldPanel(wx.Panel):
                         shortest_combo = (w1, w2)
             # print('Shortest height', shortest_height)
             # print('Shortest combo', shortest_combo)
-            print(_app_state[WAYPOINTS].index(shortest_combo[0]),
-                  _app_state[WAYPOINTS].index(shortest_combo[1]))
+            print(waypoints.index(shortest_combo[0]),
+                  waypoints.index(shortest_combo[1]))
             if shortest_height < 4:
-                idx = max(_app_state[WAYPOINTS].index(shortest_combo[0]),
-                          _app_state[WAYPOINTS].index(shortest_combo[1]))
-                _app_state[WAYPOINTS].insert(idx, new_waypoint)
+                idx = max(waypoints.index(shortest_combo[0]),
+                          waypoints.index(shortest_combo[1]))
+                waypoints.insert(idx, new_waypoint)
             else:
-                _app_state[WAYPOINTS].append(new_waypoint)
+                waypoints.append(new_waypoint)
         else:
-            _app_state[WAYPOINTS].append(new_waypoint)
+            waypoints.append(new_waypoint)
+        _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints = waypoints
         self._selected_node = new_waypoint
         self.control_panel.select_waypoint(new_waypoint)
         self.redraw()
@@ -626,16 +647,20 @@ class FieldPanel(wx.Panel):
         self.control_panel.select_waypoint(None)
         delnode = self._find_closest_waypoint(x, y)
         if delnode is not None:
-            _app_state[WAYPOINTS].remove(delnode)
+            _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints.remove(delnode)
         else:
             # Add waypoint between endpoints of closest spline
-            # TODO: Figure out how to find closest spline
             spline_start = self.find_closest_spline(x, y)
             if spline_start is not None:
-                start_index = _app_state[WAYPOINTS].index(spline_start)
+                start_index = (
+                    _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
+                    .index(spline_start)
+                )
                 fieldx, fieldy = self._screen_to_field(x, y)
                 w = Waypoint(fieldx, fieldy, 10, 0)
-                _app_state[WAYPOINTS].insert(start_index+1, w)
+                _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints.insert(
+                    start_index+1, w
+                )
         self.redraw()
 
     # select the closest waypoint to the click for modification
@@ -658,6 +683,7 @@ class ControlPanel(wx.Panel):
         self.highlight_waypoint = None
         self.show_control_points = False
         self.draw_field_center = True
+        self.routine_rename_in_progress = None
 
         # Create button objects. By themselves they do nothing
         export_profile_btn = wx.Button(self,
@@ -671,15 +697,12 @@ class ControlPanel(wx.Panel):
         show_control_points_btn.SetValue(self.show_control_points)
         draw_field_center_btn.SetValue(self.draw_field_center)
 
-        routine_name_lbl = wx.StaticText(self, label='Routine Name')
-        self.routine_ddl = wx.ListCtrl(self, style=wx.LC_REPORT)
+        routine_new_btn = wx.Button(self, label='Create Routine')
+        ddlstyle = wx.LC_REPORT | wx.LC_EDIT_LABELS
+        self.routine_ddl = wx.ListCtrl(self, style=ddlstyle)
         self.routine_ddl.AppendColumn('Routine Name')
         choices = [
-            'Routine 1',
-            'Routine 2',
-            'Routine 3',
-            'Routine 4',
-            'Routine 5',
+            r for r in _app_state[ROUTINES].keys()
         ]
 
         for c in choices:
@@ -708,6 +731,12 @@ class ControlPanel(wx.Panel):
         self.waypoint_y.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_v.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_heading.Bind(wx.EVT_TEXT, self.on_waypoint_change)
+        self.routine_ddl.Bind(wx.EVT_LIST_ITEM_SELECTED,
+                              self.on_routine_select)
+        self.routine_ddl.Bind(wx.EVT_LIST_BEGIN_LABEL_EDIT,
+                              self.on_routine_name_change_begin)
+        self.routine_ddl.Bind(wx.EVT_LIST_END_LABEL_EDIT,
+                              self.on_routine_name_change_end)
 
         # Now we pack the elements into a layout element that will size
         # and position them appropriately. This is what gets them onto the
@@ -715,7 +744,7 @@ class ControlPanel(wx.Panel):
         hbox = wx.BoxSizer(wx.VERTICAL)
         border = 5
 
-        hbox.Add(routine_name_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(routine_new_btn, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(self.routine_ddl, 0, wx.EXPAND | wx.ALL, border=border)
 
         hbox.Add(waypoint_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
@@ -796,7 +825,7 @@ class ControlPanel(wx.Panel):
 
     # TODO: Not complete at all yet.
     def export_profile(self, evt):
-        buildit(_app_state[WAYPOINTS])
+        buildit(_current_waypoints())
         wx.MessageDialog(
             parent=None, message='Data exported to clipoboard'
         ).ShowModal()
@@ -851,6 +880,25 @@ class ControlPanel(wx.Panel):
             print('Using old value of heading, input is invalid')
 
         self.field_panel.redraw()
+
+    def on_routine_select(self, evt):
+        print('clickly pop')
+
+    def on_routine_name_change_begin(self, evt):
+        print('begin name change')
+        self.routine_rename_in_progress = evt.GetLabel()
+        print(evt.GetLabel())
+
+    def on_routine_name_change_end(self, evt):
+        print('name change')
+        newlabel = evt.GetLabel()
+        oldlabel = self.routine_rename_in_progress
+
+        if newlabel == oldlabel:
+            print('no rename needed')
+            return
+
+        print(f'Rename {oldlabel} to {newlabel}')
 
 
 class TransformDialog(wx.Dialog):
@@ -977,11 +1025,6 @@ class MainWindow(wx.Frame):
 
     def close_window(self, event):
         self.Destroy()
-
-    def set_waypoints(self, waypoints):
-        global _app_state
-        _app_state[WAYPOINTS] = waypoints
-        self.field_panel.redraw()
 
 
 def buildit(waypoints):
