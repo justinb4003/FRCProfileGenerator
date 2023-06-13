@@ -803,11 +803,11 @@ class ControlPanel(wx.Panel):
 
     def toggle_control_points(self, evt):
         self.show_control_points = not self.show_control_points
-        self.field_panel._draw_waypoints()
+        self.field_panel.redraw()
 
     def toggle_draw_field_center(self, evt):
         self.draw_field_center = not self.draw_field_center
-        self.field_panel._draw_waypoints()
+        self.field_panel.redraw()
 
     def select_waypoint(self, waypoint: Waypoint):
         if waypoint is not None:
