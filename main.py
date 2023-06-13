@@ -3,6 +3,7 @@ from datetime import date, time
 import os
 import wx
 import sys
+import copy
 import json
 import math
 import jsonpickle
@@ -134,11 +135,11 @@ def get_default_app_state():
         'BL': Transformation(),
     }
 
-    state[TFMS]['RL'].steps = [
+    state[TFMS]['BL'].steps = [
         TransformationStep('Mirror Y', MIRROR_Y_MATRIX, None),
     ]
 
-    state[TFMS]['BL'].steps = [
+    state[TFMS]['RL'].steps = [
         TransformationStep('Mirror X', MIRROR_X_MATRIX, None)
     ]
 
@@ -646,21 +647,17 @@ class FieldPanel(wx.Panel):
         self._selected_node = None
         self.control_panel.select_waypoint(None)
         delnode = self._find_closest_waypoint(x, y)
+        current_routine = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         if delnode is not None:
-            _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints.remove(delnode)
+            current_routine.waypoints.remove(delnode)
         else:
             # Add waypoint between endpoints of closest spline
             spline_start = self.find_closest_spline(x, y)
             if spline_start is not None:
-                start_index = (
-                    _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
-                    .index(spline_start)
-                )
+                start_index = current_routine.index(spline_start)
                 fieldx, fieldy = self._screen_to_field(x, y)
                 w = Waypoint(fieldx, fieldy, 10, 0)
-                _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints.insert(
-                    start_index+1, w
-                )
+                current_routine.waypoints.insert(start_index+1, w)
         self.redraw()
 
     # select the closest waypoint to the click for modification
@@ -697,16 +694,13 @@ class ControlPanel(wx.Panel):
         show_control_points_btn.SetValue(self.show_control_points)
         draw_field_center_btn.SetValue(self.draw_field_center)
 
-        routine_new_btn = wx.Button(self, label='Create Routine')
+        self.routine_new_btn = wx.Button(self, label='Create Blank Routine')
+        self.routine_clone_btn = wx.Button(self, label='Clone This Routine')
         ddlstyle = wx.LC_REPORT | wx.LC_EDIT_LABELS
         self.routine_ddl = wx.ListCtrl(self, style=ddlstyle)
         self.routine_ddl.AppendColumn('Routine Name')
-        choices = [
-            r for r in _app_state[ROUTINES].keys()
-        ]
 
-        for c in choices:
-            self.routine_ddl.InsertStringItem(sys.maxsize, c)
+        self.build_routine_choices()
 
         waypoint_x_lbl = wx.StaticText(self, label='Selected Waypoint X')
         self.waypoint_x = wx.TextCtrl(self)
@@ -720,6 +714,8 @@ class ControlPanel(wx.Panel):
         # Now we 'bind' events from the controls to functions within the
         # application that can handle them.
         # Button click events
+        self.routine_new_btn.Bind(wx.EVT_BUTTON, self.on_routine_new)
+        self.routine_clone_btn.Bind(wx.EVT_BUTTON, self.on_routine_clone)
         add_transformation_btn.Bind(wx.EVT_BUTTON, self.add_transformation)
         export_profile_btn.Bind(wx.EVT_BUTTON, self.export_profile)
         draw_field_center_btn.Bind(wx.EVT_CHECKBOX,
@@ -731,6 +727,7 @@ class ControlPanel(wx.Panel):
         self.waypoint_y.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_v.Bind(wx.EVT_TEXT, self.on_waypoint_change)
         self.waypoint_heading.Bind(wx.EVT_TEXT, self.on_waypoint_change)
+
         self.routine_ddl.Bind(wx.EVT_LIST_ITEM_SELECTED,
                               self.on_routine_select)
         self.routine_ddl.Bind(wx.EVT_LIST_BEGIN_LABEL_EDIT,
@@ -744,7 +741,9 @@ class ControlPanel(wx.Panel):
         hbox = wx.BoxSizer(wx.VERTICAL)
         border = 5
 
-        hbox.Add(routine_new_btn, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.Add(self.routine_new_btn, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.AddSpacer(4)
+        hbox.Add(self.routine_clone_btn, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(self.routine_ddl, 0, wx.EXPAND | wx.ALL, border=border)
 
         hbox.Add(waypoint_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
@@ -767,6 +766,39 @@ class ControlPanel(wx.Panel):
         hbox.Add(export_profile_btn, 0, wx.EXPAND | wx.ALL, border=border)
         self.SetSizer(hbox)
         self.Fit()
+
+    def build_routine_choices(self):
+        self.routine_ddl.DeleteAllItems()
+        choices = [
+            r for r in _app_state[ROUTINES].keys()
+        ]
+
+        for c in choices:
+            self.routine_ddl.InsertStringItem(sys.maxsize, c)
+        self.Fit()
+
+    @modifies_state
+    def on_routine_new(self, evt):
+        newRoutine = Routine()
+        newRoutine.name = 'New Routine'
+        _app_state[ROUTINES][newRoutine.name] = newRoutine
+        _app_state[CURRENT_ROUTINE] = newRoutine.name
+        self.field_panel.redraw()
+        self.build_routine_choices()
+        pass
+
+    @modifies_state
+    def on_routine_clone(self, evt):
+        clone = copy.deepcopy(
+            _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
+        )
+        clone.name = f'{clone.name} (clone)'
+        _app_state[ROUTINES][clone.name] = clone
+        _app_state[CURRENT_ROUTINE] = clone.name
+        self.field_panel.redraw()
+        self.build_routine_choices()
+        # TODO: Redraw the control panel routine list now
+        pass
 
     def update_transform_display(self):
         self.transform_display.Clear(True)
@@ -852,6 +884,7 @@ class ControlPanel(wx.Panel):
 
         self.active_waypoint = waypoint
 
+    @modifies_state
     def on_waypoint_change(self, evt):
         if self.active_waypoint is None:
             return
@@ -881,14 +914,18 @@ class ControlPanel(wx.Panel):
 
         self.field_panel.redraw()
 
+    @modifies_state
     def on_routine_select(self, evt):
-        print('clickly pop')
+        routine = evt.GetLabel()
+        _app_state[CURRENT_ROUTINE] = routine
+        self.field_panel.redraw()
 
     def on_routine_name_change_begin(self, evt):
         print('begin name change')
         self.routine_rename_in_progress = evt.GetLabel()
         print(evt.GetLabel())
 
+    @modifies_state
     def on_routine_name_change_end(self, evt):
         print('name change')
         newlabel = evt.GetLabel()
@@ -899,6 +936,12 @@ class ControlPanel(wx.Panel):
             return
 
         print(f'Rename {oldlabel} to {newlabel}')
+        r = _app_state[ROUTINES][oldlabel]
+        del _app_state[ROUTINES][oldlabel]
+        r.name = newlabel
+        _app_state[ROUTINES][newlabel] = r
+        if _app_state[CURRENT_ROUTINE] == oldlabel:
+            _app_state[CURRENT_ROUTINE] = newlabel
 
 
 class TransformDialog(wx.Dialog):
