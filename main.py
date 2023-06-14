@@ -703,6 +703,7 @@ class ControlPanel(wx.Panel):
         ddlstyle = wx.LC_REPORT | wx.LC_EDIT_LABELS | wx.LC_SINGLE_SEL
         self.routine_ddl = wx.ListCtrl(self, style=ddlstyle)
         self.routine_ddl.AppendColumn('Routine Name')
+        self.routine_ddl.SetColumnWidth(0, 200)
 
         self.build_routine_choices()
 
