@@ -115,6 +115,7 @@ CURRENT_ROUTINE = 'current_routine'
 
 
 def get_default_app_state():
+    initial_route_name = 'New Routine'
     state = {
         FIELD_BACKGROUND_IMAGE: 'field_charged_up.png',
         FIELD_X_OFFSET: 0,
@@ -123,11 +124,13 @@ def get_default_app_state():
         CROSSHAIR_LENGTH: 50,
         CROSSHAIR_THICKNESS: 10,
         ROUTINES: {},
-        CURRENT_ROUTINE: 'Pick One',
+        CURRENT_ROUTINE: initial_route_name,
         TFMS: {},
     }
 
-    state[ROUTINES]['Pick One'] = Routine()
+    r = Routine()
+    r.name = initial_route_name
+    state[ROUTINES][initial_route_name] = r
 
     state[TFMS] = {
         'RL': Transformation(),
@@ -696,7 +699,7 @@ class ControlPanel(wx.Panel):
 
         self.routine_new_btn = wx.Button(self, label='Create Blank Routine')
         self.routine_clone_btn = wx.Button(self, label='Clone This Routine')
-        ddlstyle = wx.LC_REPORT | wx.LC_EDIT_LABELS
+        ddlstyle = wx.LC_REPORT | wx.LC_EDIT_LABELS | wx.LC_SINGLE_SEL
         self.routine_ddl = wx.ListCtrl(self, style=ddlstyle)
         self.routine_ddl.AppendColumn('Routine Name')
 
@@ -773,8 +776,13 @@ class ControlPanel(wx.Panel):
             r for r in _app_state[ROUTINES].keys()
         ]
 
+        idx = 0
         for c in choices:
             self.routine_ddl.InsertStringItem(sys.maxsize, c)
+            if c == _app_state[CURRENT_ROUTINE]:
+                self.routine_ddl.SetItemState(idx, wx.LIST_STATE_SELECTED,
+                                              wx.LIST_STATE_SELECTED)
+            idx += 1
         self.Fit()
 
     @modifies_state
@@ -918,6 +926,7 @@ class ControlPanel(wx.Panel):
     def on_routine_select(self, evt):
         routine = evt.GetLabel()
         _app_state[CURRENT_ROUTINE] = routine
+        print(f'Selected routine {routine}')
         self.field_panel.redraw()
 
     def on_routine_name_change_begin(self, evt):
