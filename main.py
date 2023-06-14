@@ -18,9 +18,6 @@ from wx.lib.splitter import MultiSplitterWindow
 
 
 # Define a type that can hold a waypoint's data.
-# You can think of this like a C struct, POJO (Plain Old Java Object)
-# POCO (Plain old C# Object) or as if we defined an actual Python
-# class for this, but this is much shorter and simpler.
 class Waypoint():
     x: float = 0.0
     y: float = 0.0
@@ -153,6 +150,14 @@ def get_default_app_state():
     return state
 
 
+# This function is used a function decorator:
+# https://dbader.org/blog/python-decorators
+# What this meeans is when you place '@modifies_state' above a function
+# this function will run, but insice the 'wrapper' method we will call
+# the method that you've placed the decorator above. This allows us to
+# do some work before and after the function you've decorated runs.
+# In this case we are storing the app state to disk after the function
+# runs.
 def modifies_state(func):
     def wrapper(*args, **kwargs):
         func(*args, **kwargs)
@@ -177,6 +182,12 @@ def store_app_state():
         f.write(json_str)
 
 
+# With the pyinstaller package we need to use this function to get the
+# path to our resources. This is because when we package the app up
+# with pyinstaller it creates a temporary directory with all of our
+# resources in it. This function will return the path to that directory
+# when we are running in a packaged state and the path to the current
+# directory when we are running in a development state.
 def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS
@@ -200,7 +211,7 @@ def serialize(obj):
     return obj.__dict__
 
 
-# Helper function to 'pretty pretty' print a Python object in JSON
+# Helper function to 'pretty' print a Python object in JSON
 # format.
 def pp(obj):
     print(json.dumps(obj, sort_keys=True, indent=4,
@@ -212,11 +223,11 @@ def pp(obj):
 # JJB: I also implemented it wrong so back to Python's implementation it is.
 def dist(x1, y1, x2, y2):
     return math.dist([x1, y1], [x2, y2])
-    return sqrt(abs(x2-x1)**2 + sqrt(abs(y2-y1))**2)
 
 
 # We can use Heron's formula to find the height of a triangle given
 # the lengths of the sides.
+# This used to detect when we click between two existing points.
 def triangle_height(way1, way2, way3):
     a = dist(way2.x, way2.y, way3.x, way3.y)
     b = dist(way1.x, way1.y, way2.x, way2.y)
@@ -862,7 +873,6 @@ class ControlPanel(wx.Panel):
 
     @modifies_state
     def add_transformation(self, evt):
-        # Make a dialog now?
         global _app_state
         dlg = TransformDialog(None)
         t = dlg.ShowModal()
