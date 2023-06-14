@@ -699,6 +699,7 @@ class ControlPanel(wx.Panel):
 
         self.routine_new_btn = wx.Button(self, label='Create Blank Routine')
         self.routine_clone_btn = wx.Button(self, label='Clone This Routine')
+        self.routine_delete_btn = wx.Button(self, label='Delete This Routine')
         ddlstyle = wx.LC_REPORT | wx.LC_EDIT_LABELS | wx.LC_SINGLE_SEL
         self.routine_ddl = wx.ListCtrl(self, style=ddlstyle)
         self.routine_ddl.AppendColumn('Routine Name')
@@ -719,6 +720,7 @@ class ControlPanel(wx.Panel):
         # Button click events
         self.routine_new_btn.Bind(wx.EVT_BUTTON, self.on_routine_new)
         self.routine_clone_btn.Bind(wx.EVT_BUTTON, self.on_routine_clone)
+        self.routine_delete_btn.Bind(wx.EVT_BUTTON, self.on_routine_delete)
         add_transformation_btn.Bind(wx.EVT_BUTTON, self.add_transformation)
         export_profile_btn.Bind(wx.EVT_BUTTON, self.export_profile)
         draw_field_center_btn.Bind(wx.EVT_CHECKBOX,
@@ -747,6 +749,8 @@ class ControlPanel(wx.Panel):
         hbox.Add(self.routine_new_btn, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.AddSpacer(4)
         hbox.Add(self.routine_clone_btn, 0, wx.EXPAND | wx.ALL, border=border)
+        hbox.AddSpacer(4)
+        hbox.Add(self.routine_delete_btn, 0, wx.EXPAND | wx.ALL, border=border)
         hbox.Add(self.routine_ddl, 0, wx.EXPAND | wx.ALL, border=border)
 
         hbox.Add(waypoint_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
@@ -805,8 +809,14 @@ class ControlPanel(wx.Panel):
         _app_state[CURRENT_ROUTINE] = clone.name
         self.field_panel.redraw()
         self.build_routine_choices()
-        # TODO: Redraw the control panel routine list now
-        pass
+
+    @modifies_state
+    def on_routine_delete(self, evt):
+        delname = _app_state[CURRENT_ROUTINE]
+        _app_state[CURRENT_ROUTINE] = list(_app_state[ROUTINES].keys())[0]
+        del _app_state[ROUTINES][delname]
+        self.field_panel.redraw()
+        self.build_routine_choices()
 
     def update_transform_display(self):
         self.transform_display.Clear(True)
