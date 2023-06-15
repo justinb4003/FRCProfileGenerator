@@ -664,15 +664,7 @@ class FieldPanel(wx.Panel):
         current_routine = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         if delnode is not None:
             current_routine.waypoints.remove(delnode)
-        else:
-            # Add waypoint between endpoints of closest spline
-            spline_start = self.find_closest_spline(x, y)
-            if spline_start is not None:
-                start_index = current_routine.index(spline_start)
-                fieldx, fieldy = self._screen_to_field(x, y)
-                w = Waypoint(fieldx, fieldy, 10, 0)
-                current_routine.waypoints.insert(start_index+1, w)
-        self.redraw()
+            self.redraw()
 
     # select the closest waypoint to the click for modification
     # via the controls in the control panel UI
