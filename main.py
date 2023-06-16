@@ -13,6 +13,7 @@ from copy import deepcopy
 from math import sqrt, cos, sin, radians
 from typing import List
 from wx.lib.splitter import MultiSplitterWindow
+from wx.lib.scrolledpanel import ScrolledPanel
 
 # Using flake8 for linting
 
@@ -711,9 +712,10 @@ class FieldPanel(wx.Panel):
 
 
 # A wx Panel that holds the controls on the right side, or 'control' panel
-class ControlPanel(wx.Panel):
+class ControlPanel(ScrolledPanel):
     def __init__(self, parent):
-        wx.Panel.__init__(self, parent=parent)
+        ScrolledPanel.__init__(self, parent=parent)
+        self.SetupScrolling()
         self.field_panel = None
         self.active_waypoint = None
         self.highlight_waypoint = None
