@@ -59,7 +59,7 @@ class TransformationStep():
 
 # Container class for holding a transformation. This is a path based on
 # our primary one but mirrored or rotated around a center point on the field.
-# Using ChargedUp as an example if your main route was "Red Right" or 'RR'
+# Using ChargedUp as an example if your main  was "Red Right" or 'RR'
 # then starting from Red Left might be named RL, Blue Right would be BR, and
 # Blue Left BL.
 class Transformation():
@@ -315,6 +315,8 @@ class FieldPanel(wx.Panel):
     control_panel = None
 
     def __init__(self, parent):
+        self.show_control_points = False
+        self.draw_field_center = True
         # We need to hang onto a reference to the control panel's elemnts
         # because the app needs to send data over to them now and again
         # likewise the control panel object has a reference to this field panel
@@ -346,8 +348,19 @@ class FieldPanel(wx.Panel):
         self.field_offset_y_txt = wx.TextCtrl(self)
         self.field_offset_y_txt.ChangeValue(str(_app_state[FIELD_Y_OFFSET]))
 
+        draw_field_center_btn = wx.CheckBox(self,
+                                            label='Draw Field Center')
+        show_control_points_btn = wx.CheckBox(self,
+                                              label='Show Control Points')
+        show_control_points_btn.SetValue(self.show_control_points)
+        draw_field_center_btn.SetValue(self.draw_field_center)
+
         self.field_offset_x_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
         self.field_offset_y_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
+        draw_field_center_btn.Bind(wx.EVT_CHECKBOX,
+                                   self.toggle_draw_field_center)
+        show_control_points_btn.Bind(wx.EVT_CHECKBOX,
+                                     self.toggle_control_points)
 
         # The BoxSizer is a layout manager that arranges the controls in a box
         vbox = wx.BoxSizer(wx.VERTICAL)
@@ -363,12 +376,25 @@ class FieldPanel(wx.Panel):
         ybox.Add(field_offset_y_lbl, 0, wx.EXPAND | wx.ALL, border=border)
         ybox.Add(self.field_offset_y_txt, 0, wx.EXPAND | wx.ALL, border=border)
 
+        zbox = wx.BoxSizer(wx.VERTICAL)
+        zbox.Add(draw_field_center_btn, 0, wx.EXPAND | wx.ALL, border=border)
+        zbox.Add(show_control_points_btn, 0, wx.EXPAND | wx.ALL, border=border)
+
         hbox.Add(xbox)
         hbox.Add(ybox)
+        hbox.Add(zbox)
         vbox.Add(hbox)
 
         self.SetSizer(vbox)
         self.Fit()
+        self.redraw()
+
+    def toggle_control_points(self, evt):
+        self.show_control_points = not self.show_control_points
+        self.redraw()
+
+    def toggle_draw_field_center(self, evt):
+        self.draw_field_center = not self.draw_field_center
         self.redraw()
 
     # Event fires any time the mouse moves on the field drawing
@@ -388,6 +414,7 @@ class FieldPanel(wx.Panel):
             # highlight node
             if last_highlight != self._highlight_node:
                 self.redraw()
+                self.control_panel.build_waypoint_grid()
             return
         event.Skip()
         # print("Dragging position", x, y)
@@ -397,6 +424,12 @@ class FieldPanel(wx.Panel):
             self._selected_node.x = fieldx
             self._selected_node.y = fieldy
             self.control_panel.select_waypoint(self._selected_node)
+            waypoints = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints
+            idx = waypoints.index(self._selected_node)
+            waypoints[idx].x = fieldx
+            waypoints[idx].y = fieldy
+            print(idx, fieldx, fieldy)
+            self.control_panel.build_waypoint_grid()
             self.redraw()
 
     def _screen_to_field(self, x, y):
@@ -518,9 +551,7 @@ class FieldPanel(wx.Panel):
                 ctl1 = wx.Point2D(x1, y1)
                 ctl2 = wx.Point2D(x2, y2)
                 endP = wx.Point2D(endx, endy)
-                if self.control_panel is not None \
-                   and \
-                   self.control_panel.show_control_points:
+                if self.show_control_points:
                     # TODO: Figure out how I broke the color on control points
                     gc.SetPen(wx.Pen('blue', 2))
                     dc.DrawCircle(int(ctl1.x), int(ctl1.y), 2)
@@ -576,7 +607,7 @@ class FieldPanel(wx.Panel):
         field_blank = wx.Image(imgpath,
                                wx.BITMAP_TYPE_ANY).ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
-        if self.control_panel and self.control_panel.draw_field_center:
+        if self.draw_field_center:
             self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
         for idx, w in enumerate(_current_waypoints()):
@@ -649,6 +680,7 @@ class FieldPanel(wx.Panel):
         _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints = waypoints
         self._selected_node = new_waypoint
         self.control_panel.select_waypoint(new_waypoint)
+        self.control_panel.build_waypoint_grid()
         self.redraw()
 
     # Delete the closest waypoint to the click
@@ -665,6 +697,7 @@ class FieldPanel(wx.Panel):
         if delnode is not None:
             current_routine.waypoints.remove(delnode)
             self.redraw()
+            self.control_panel.build_waypoint_grid()
 
     # select the closest waypoint to the click for modification
     # via the controls in the control panel UI
@@ -684,8 +717,6 @@ class ControlPanel(wx.Panel):
         self.field_panel = None
         self.active_waypoint = None
         self.highlight_waypoint = None
-        self.show_control_points = False
-        self.draw_field_center = True
         self.routine_rename_in_progress = None
 
         # Create button objects. By themselves they do nothing
@@ -693,31 +724,19 @@ class ControlPanel(wx.Panel):
                                        label='Export Profile')
         add_transformation_btn = wx.Button(self,
                                            label='Add Transformation')
-        draw_field_center_btn = wx.CheckBox(self,
-                                            label='Draw Field Center')
-        show_control_points_btn = wx.CheckBox(self,
-                                              label='Show Control Points')
-        show_control_points_btn.SetValue(self.show_control_points)
-        draw_field_center_btn.SetValue(self.draw_field_center)
 
-        self.routine_new_btn = wx.Button(self, label='Create Blank Routine')
-        self.routine_clone_btn = wx.Button(self, label='Clone This Routine')
-        self.routine_delete_btn = wx.Button(self, label='Delete This Routine')
-        ddlstyle = wx.LC_REPORT | wx.LC_EDIT_LABELS | wx.LC_SINGLE_SEL
-        self.routine_ddl = wx.ListCtrl(self, style=ddlstyle)
-        self.routine_ddl.AppendColumn('Routine Name')
-        self.routine_ddl.SetColumnWidth(0, 200)
+        self.routine_new_btn = wx.Button(self, label='+ Blank')
+        self.routine_clone_btn = wx.Button(self, label='+ Clone')
+        self.routine_delete_btn = wx.Button(self, label='Delete')
+        gridstyle = wx.LC_REPORT | wx.LC_EDIT_LABELS | wx.LC_SINGLE_SEL
+        self.routine_grid = wx.ListCtrl(self, style=gridstyle)
+        self.routine_grid.AppendColumn('Routine Name')
+        self.routine_grid.SetColumnWidth(0, 200)
 
         self.build_routine_choices()
 
-        waypoint_x_lbl = wx.StaticText(self, label='Selected Waypoint X')
-        self.waypoint_x = wx.TextCtrl(self)
-        waypoint_y_lbl = wx.StaticText(self, label='Selected Waypoint Y')
-        self.waypoint_y = wx.TextCtrl(self)
-        waypoint_v_lbl = wx.StaticText(self, label='Velocity (fps)')
-        self.waypoint_v = wx.TextCtrl(self)
-        waypoint_heading_lbl = wx.StaticText(self, label='Heading (degrees)')
-        self.waypoint_heading = wx.TextCtrl(self)
+        self.waypoint_grid = wx.BoxSizer(wx.VERTICAL)
+        self.build_waypoint_grid()
 
         # Now we 'bind' events from the controls to functions within the
         # application that can handle them.
@@ -727,71 +746,88 @@ class ControlPanel(wx.Panel):
         self.routine_delete_btn.Bind(wx.EVT_BUTTON, self.on_routine_delete)
         add_transformation_btn.Bind(wx.EVT_BUTTON, self.add_transformation)
         export_profile_btn.Bind(wx.EVT_BUTTON, self.export_profile)
-        draw_field_center_btn.Bind(wx.EVT_CHECKBOX,
-                                   self.toggle_draw_field_center)
-        show_control_points_btn.Bind(wx.EVT_CHECKBOX,
-                                     self.toggle_control_points)
-        self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
-        self.waypoint_x.Bind(wx.EVT_TEXT, self.on_waypoint_change)
-        self.waypoint_y.Bind(wx.EVT_TEXT, self.on_waypoint_change)
-        self.waypoint_v.Bind(wx.EVT_TEXT, self.on_waypoint_change)
-        self.waypoint_heading.Bind(wx.EVT_TEXT, self.on_waypoint_change)
-
-        self.routine_ddl.Bind(wx.EVT_LIST_ITEM_SELECTED,
+        self.routine_grid.Bind(wx.EVT_LIST_ITEM_SELECTED,
                               self.on_routine_select)
-        self.routine_ddl.Bind(wx.EVT_LIST_BEGIN_LABEL_EDIT,
+        self.routine_grid.Bind(wx.EVT_LIST_BEGIN_LABEL_EDIT,
                               self.on_routine_name_change_begin)
-        self.routine_ddl.Bind(wx.EVT_LIST_END_LABEL_EDIT,
+        self.routine_grid.Bind(wx.EVT_LIST_END_LABEL_EDIT,
                               self.on_routine_name_change_end)
 
         # Now we pack the elements into a layout element that will size
         # and position them appropriately. This is what gets them onto the
         # display finally.
-        hbox = wx.BoxSizer(wx.VERTICAL)
+        vbox = wx.BoxSizer(wx.VERTICAL)
         border = 5
 
-        hbox.Add(self.routine_new_btn, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.AddSpacer(4)
-        hbox.Add(self.routine_clone_btn, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.AddSpacer(4)
-        hbox.Add(self.routine_delete_btn, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(self.routine_ddl, 0, wx.EXPAND | wx.ALL, border=border)
-
-        hbox.Add(waypoint_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(self.waypoint_x, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(waypoint_y_lbl, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(self.waypoint_y, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(waypoint_v_lbl, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(self.waypoint_v, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(waypoint_heading_lbl, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(self.waypoint_heading, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.AddSpacer(8)
-        hbox.Add(draw_field_center_btn, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(show_control_points_btn, 0, wx.EXPAND | wx.ALL, border=border)
-
-        hbox.AddSpacer(8)
+        routine_box = wx.BoxSizer(wx.HORIZONTAL)
+        routine_box.Add(self.routine_new_btn, 0, wx.EXPAND | wx.ALL,
+                        border=border)
+        routine_box.AddSpacer(4)
+        routine_box.Add(self.routine_clone_btn, 0, wx.EXPAND | wx.ALL,
+                        border=border)
+        routine_box.AddSpacer(4)
+        routine_box.Add(self.routine_delete_btn, 0, wx.EXPAND | wx.ALL,
+                        border=border)
+        vbox.Add(routine_box)
+        vbox.Add(self.routine_grid, 0, wx.EXPAND | wx.ALL, border=border)
+        vbox.AddSpacer(8)
+        vbox.Add(self.waypoint_grid, 0, wx.EXPAND | wx.ALL, border=border)
+        vbox.AddSpacer(8)
         self.transform_display = wx.BoxSizer(wx.VERTICAL)
         self.update_transform_display()
-        hbox.Add(self.transform_display, 0, wx.SHRINK | wx.ALL, border=border)
-        hbox.Add(add_transformation_btn, 0, wx.EXPAND | wx.ALL, border=border)
-        hbox.Add(export_profile_btn, 0, wx.EXPAND | wx.ALL, border=border)
-        self.SetSizer(hbox)
+        vbox.Add(self.transform_display, 0, wx.SHRINK | wx.ALL, border=border)
+        vbox.Add(add_transformation_btn, 0, wx.EXPAND | wx.ALL, border=border)
+        vbox.Add(export_profile_btn, 0, wx.EXPAND | wx.ALL, border=border)
+        self.SetSizer(vbox)
         self.Fit()
 
     def build_routine_choices(self):
-        self.routine_ddl.DeleteAllItems()
+        self.routine_grid.DeleteAllItems()
         choices = [
             r for r in _app_state[ROUTINES].keys()
         ]
 
         idx = 0
         for c in choices:
-            self.routine_ddl.InsertStringItem(sys.maxsize, c)
+            self.routine_grid.InsertStringItem(sys.maxsize, c)
             if c == _app_state[CURRENT_ROUTINE]:
-                self.routine_ddl.SetItemState(idx, wx.LIST_STATE_SELECTED,
+                self.routine_grid.SetItemState(idx, wx.LIST_STATE_SELECTED,
                                               wx.LIST_STATE_SELECTED)
             idx += 1
         self.Fit()
+
+    def build_waypoint_grid(self):
+        self.waypoint_grid.Clear()
+        waypoints = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints
+        idx = 0
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        for w in waypoints:
+            wbox = wx.BoxSizer(wx.HORIZONTAL)
+            vbox.Add(wbox, 0, wx.EXPAND)
+            x_txt = wx.TextCtrl(self)
+            x_txt.ChangeValue(str(w.x))
+            y_txt = wx.TextCtrl(self)
+            y_txt.ChangeValue(str(w.y))
+            del_btn = wx.Button(self)
+            del_btn.SetName(str(idx))
+            del_btn.SetLabel('-')
+            del_btn.Bind(wx.EVT_BUTTON, self.on_waypoint_delete)
+            wbox.Add(wx.StaticText(self, label=f'{idx}'), 0, wx.EXPAND)
+            wbox.Add(x_txt, 0, wx.EXPAND)
+            wbox.Add(y_txt, 0, wx.EXPAND)
+            wbox.Add(del_btn, 0, wx.EXPAND)
+            idx += 1
+        self.waypoint_grid.Add(vbox)
+        self.Layout()
+        self.Update()
+
+    # Delete a node based on a UI event from our waypoint "grid"
+    @modifies_state
+    def on_waypoint_delete(self, evt):
+        idx = int(evt.GetEventObject().GetName())
+        del _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints[idx]
+        self.field_panel.redraw()
+        self.build_waypoint_grid()
 
     @modifies_state
     def on_routine_new(self, evt):
@@ -883,15 +919,9 @@ class ControlPanel(wx.Panel):
             parent=None, message='Data exported to clipoboard'
         ).ShowModal()
 
-    def toggle_control_points(self, evt):
-        self.show_control_points = not self.show_control_points
-        self.field_panel.redraw()
-
-    def toggle_draw_field_center(self, evt):
-        self.draw_field_center = not self.draw_field_center
-        self.field_panel.redraw()
-
     def select_waypoint(self, waypoint: Waypoint):
+        # TODO: Change how this works entirely to use a grid
+        return
         if waypoint is not None:
             self.waypoint_x.ChangeValue(str(waypoint.x))
             self.waypoint_y.ChangeValue(str(waypoint.y))
@@ -941,6 +971,7 @@ class ControlPanel(wx.Panel):
         _app_state[CURRENT_ROUTINE] = routine
         print(f'Selected routine {routine}')
         self.field_panel.redraw()
+        self.build_waypoint_grid()
 
     def on_routine_name_change_begin(self, evt):
         print('begin name change')
@@ -1066,7 +1097,7 @@ class TransformDialog(wx.Dialog):
 # A wx Frame that holds the main application and places instanes of our
 # above mentioned Panels in the right spots
 class MainWindow(wx.Frame):
-    def __init__(self, parent,   id):
+    def __init__(self, parent, id):
         wx.Frame.__init__(self,
                           parent,
                           id,
