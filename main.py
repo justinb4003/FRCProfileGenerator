@@ -716,6 +716,7 @@ class ControlPanel(ScrolledPanel):
     def __init__(self, parent):
         ScrolledPanel.__init__(self, parent=parent)
         self.SetupScrolling()
+        self.ShowScrollbars(wx.SHOW_SB_NEVER, wx.SHOW_SB_DEFAULT)
         self.field_panel = None
         self.active_waypoint = None
         self.highlight_waypoint = None
@@ -799,27 +800,37 @@ class ControlPanel(ScrolledPanel):
         self.Fit()
 
     def build_waypoint_grid(self):
-        self.waypoint_grid.Clear()
-        waypoints = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints
+        self.waypoint_grid.Clear(True)
+        routine = _app_state[CURRENT_ROUTINE]
+        waypoints = _app_state[ROUTINES][routine].waypoints
         idx = 0
+        spacing = 4
         vbox = wx.BoxSizer(wx.VERTICAL)
         for w in waypoints:
+            # Create a box for each waypoint
             wbox = wx.BoxSizer(wx.HORIZONTAL)
-            vbox.Add(wbox, 0, wx.EXPAND)
             x_txt = wx.TextCtrl(self)
             x_txt.ChangeValue(str(w.x))
             y_txt = wx.TextCtrl(self)
             y_txt.ChangeValue(str(w.y))
-            del_btn = wx.Button(self)
-            del_btn.SetName(str(idx))
-            del_btn.SetLabel('-')
+            del_btn = wx.Button(self, name=str(idx), label='-', size=(35, -1))
             del_btn.Bind(wx.EVT_BUTTON, self.on_waypoint_delete)
             wbox.Add(wx.StaticText(self, label=f'{idx}'), 0, wx.EXPAND)
+            wbox.AddSpacer(spacing)
             wbox.Add(x_txt, 0, wx.EXPAND)
+            wbox.AddSpacer(spacing)
             wbox.Add(y_txt, 0, wx.EXPAND)
-            wbox.Add(del_btn, 0, wx.EXPAND)
+            wbox.AddSpacer(spacing)
+            wbox.Add(del_btn, 0, wx.SHRINK)
+
+            # Add that waypoint to our vertical list
+            vbox.Add(wbox, 0, wx.EXPAND)
+            vbox.AddSpacer(spacing)
             idx += 1
+        # Add the vertila list into the 'grid' area we have for the list
         self.waypoint_grid.Add(vbox)
+        # Force it to put the widgets in the right spots with an internal
+        # calculation.
         self.Layout()
         self.Update()
 
