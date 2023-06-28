@@ -1152,7 +1152,7 @@ def gen_pf_points(routine, transform):
         if idx == 0:
             indent = 0
         else:
-            indent = 16
+            indent = 20
         point_code += (
             ' '*indent
             + f'pf.Waypoint({w.x}, {w.y}, math.radians({w.heading})),\n'
@@ -1179,22 +1179,24 @@ def buildit():
     def_trans = "RR"
     code_str = 'import pathfinder as pf\n\n'
     for routine in _app_state[ROUTINES].values():
-        rt = e(routine.name) + '_' + e(def_trans)
-        route_str = f"""# {routine.name}
-            points_{rt} = [
-                {gen_pf_points(routine, None)}
-            ]
-            info_{rt}, trajectory_{rt} = pf.generate(
-                points_{rt},
-                pf.FIT_HERMITE_CUBIC,
-                pf.SAMPLES_HIGH,
-                dt=0.05, # 50ms
-                max_velocity=1.7,
-                max_acceleration=2.0,
-                max_jerk=60.0
-            )
-        """
-        route_str = cleandoc(route_str)
+        for t in [None] + routine.active_transformations:
+            transform_name = def_trans if t is None else t.name
+            rt = e(routine.name) + '_' + e(transform_name)
+            route_str = f"""# {routine.name}
+                points_{rt} = [
+                    {gen_pf_points(routine, None)}
+                ]
+                info_{rt}, trajectory_{rt} = pf.generate(
+                    points_{rt},
+                    pf.FIT_HERMITE_CUBIC,
+                    pf.SAMPLES_HIGH,
+                    dt=0.05, # 50ms
+                    max_velocity=1.7,
+                    max_acceleration=2.0,
+                    max_jerk=60.0
+                )
+            """
+            route_str = cleandoc(route_str)
         code_str += route_str + '\n\n'
 
     print(code_str)
