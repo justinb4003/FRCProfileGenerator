@@ -9,6 +9,7 @@ import math
 import jsonpickle
 import numpy as np
 
+from inspect import cleandoc
 from copy import deepcopy
 from math import sqrt, cos, sin, radians
 from typing import List
@@ -927,10 +928,13 @@ class ControlPanel(ScrolledPanel):
 
     # TODO: Not complete at all yet.
     def export_profile(self, evt):
-        buildit(_current_waypoints())
+        buildit()
+        """
         wx.MessageDialog(
             parent=None, message='Data exported to clipoboard'
         ).ShowModal()
+        """
+        pass
 
     def select_waypoint(self, waypoint: Waypoint):
         # TODO: Change how this works entirely to use a grid
@@ -1136,11 +1140,66 @@ class MainWindow(wx.Frame):
         self.Destroy()
 
 
-def buildit(waypoints):
-    outdata = [x._asdict() for x in waypoints]
-    json_str = json.dumps(outdata, sort_keys=True, indent=4)
+def eng_to_code(instr):
+    outstr = instr.replace(' ', '_').lower()
+    return outstr
+
+
+def gen_pf_points(routine, transform):
+    point_code = ''
+
+    for idx, w in enumerate(routine.waypoints):
+        if idx == 0:
+            indent = 0
+        else:
+            indent = 16
+        point_code += (
+            ' '*indent
+            + f'pf.Waypoint({w.x}, {w.y}, math.radians({w.heading})),\n'
+        )
+    return point_code
+
+
+def buildit():
+    """
+    import pathfinder as pf
+    points = [
+        pf.Waypoint(-4, -1, math.radians(-45.0)),   # Waypoint @ x=-4, y=-1, exit angle=-45 degrees
+        pf.Waypoint(-2, -2, 0),                     # Waypoint @ x=-2, y=-2, exit angle=0 radians
+        pf.Waypoint(0, 0, 0),                       # Waypoint @ x=0, y=0,   exit angle=0 radians
+    ]
+
+    info, trajectory = pf.generate(points, pf.FIT_HERMITE_CUBIC, pf.SAMPLES_HIGH,
+                                dt=0.05, # 50ms
+                                max_velocity=1.7,
+                                max_acceleration=2.0,
+                                max_jerk=60.0)
+    """
+    e = eng_to_code
+    def_trans = "RR"
+    code_str = 'import pathfinder as pf\n\n'
+    for routine in _app_state[ROUTINES].values():
+        rt = e(routine.name) + '_' + e(def_trans)
+        route_str = f"""# {routine.name}
+            points_{rt} = [
+                {gen_pf_points(routine, None)}
+            ]
+            info_{rt}, trajectory_{rt} = pf.generate(
+                points_{rt},
+                pf.FIT_HERMITE_CUBIC,
+                pf.SAMPLES_HIGH,
+                dt=0.05, # 50ms
+                max_velocity=1.7,
+                max_acceleration=2.0,
+                max_jerk=60.0
+            )
+        """
+        route_str = cleandoc(route_str)
+        code_str += route_str + '\n\n'
+
+    print(code_str)
     if wx.TheClipboard.Open():
-        wx.TheClipboard.SetData(wx.TextDataObject(json_str))
+        wx.TheClipboard.SetData(wx.TextDataObject(code_str))
         wx.TheClipboard.Close()
 
 
