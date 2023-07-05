@@ -66,11 +66,9 @@ class TransformationStep():
 # Blue Left BL.
 class Transformation():
     steps: List[TransformationStep] = []
-    visible: bool = True
 
     def __init__(self):
         self.steps = []
-        self.visible = True
 
     def __str__(self):
         return json.dumps(dict(self), ensure_ascii=False)
@@ -129,6 +127,7 @@ def get_default_app_state():
 
     r = Routine()
     r.name = initial_route_name
+    r.active_transformations = ['RL', 'BR', 'BL']
     state[ROUTINES][initial_route_name] = r
 
     state[TFMS] = {
@@ -167,6 +166,8 @@ def modifies_state(func):
     return wrapper
 
 
+# Read the application state off disk and return it.
+# We use the 'jsonpickle' library because it keeps the type information
 def get_app_state():
     try:
         with open('app_state.json', 'r') as f:
@@ -178,6 +179,8 @@ def get_app_state():
     return obj
 
 
+# Write the application state to disk.
+# We use the 'jsonpickle' library because it keeps the type information
 def store_app_state():
     json_str = jsonpickle.encode(_app_state)
     with open('app_state.json', 'w') as f:
@@ -185,7 +188,7 @@ def store_app_state():
 
 
 # With the pyinstaller package we need to use this function to get the
-# path to our resources. This is because when we package the app up
+# path to our resources (images). This is because when we package the app up
 # with pyinstaller it creates a temporary directory with all of our
 # resources in it. This function will return the path to that directory
 # when we are running in a packaged state and the path to the current
@@ -416,7 +419,7 @@ class FieldPanel(wx.Panel):
             # highlight node
             if last_highlight != self._highlight_node:
                 self.redraw()
-                self.control_panel.build_waypoint_grid()
+                # self.control_panel.build_waypoint_grid()
             return
         event.Skip()
         # print("Dragging position", x, y)
@@ -425,13 +428,15 @@ class FieldPanel(wx.Panel):
         if self._selected_node is not None:
             self._selected_node.x = fieldx
             self._selected_node.y = fieldy
-            self.control_panel.select_waypoint(self._selected_node)
-            waypoints = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints
+            glb_control_panel.select_waypoint(self._selected_node)
+            waypoints = (
+                _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints
+            )
             idx = waypoints.index(self._selected_node)
             waypoints[idx].x = fieldx
             waypoints[idx].y = fieldy
             print(idx, fieldx, fieldy)
-            self.control_panel.build_waypoint_grid()
+            glb_control_panel.build_waypoint_grid()
             self.redraw()
 
     def _screen_to_field(self, x, y):
@@ -509,12 +514,16 @@ class FieldPanel(wx.Panel):
     def _draw_path(self, dc):
         gc = wx.GraphicsContext.Create(dc)
 
-        for path_transformation in [None] + list(_app_state[TFMS].values()):
+        cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
+        for name, path_transformation in (
+            zip([None] + list(_app_state[TFMS].keys()),
+                [None] + list(_app_state[TFMS].values())
+                )):
             path = gc.CreatePath()
             final_matrix = np.identity(2)
             final_vector = np.array([0, 0])
             if path_transformation is not None:
-                if not path_transformation.visible:
+                if name not in cr.active_transformations:
                     continue
                 for s in path_transformation.steps:
                     if s.matrix is not None:
@@ -612,10 +621,11 @@ class FieldPanel(wx.Panel):
         if self.draw_field_center:
             self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
+        cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         for idx, w in enumerate(_current_waypoints()):
             self._draw_orig_waypoint(dc, w, idx)
-            for t in _app_state[TFMS].values():
-                if not t.visible:
+            for name, t in _app_state[TFMS].items():
+                if name not in cr.active_transformations:
                     continue
                 mtx = np.identity(2)
                 trans_vec = np.array([0, 0])
@@ -712,13 +722,76 @@ class FieldPanel(wx.Panel):
         self.redraw()
 
 
+class TransformationPanel(wx.Panel):
+
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent=parent)
+        self.main_sizer = None
+        self.update_transform_display()
+
+    @modifies_state
+    def delete_transformation(self, evt):
+        name = evt.GetEventObject().GetName()
+        global _app_state
+        del _app_state[TFMS][name]
+        self.update_transform_display()
+        self.field_panel.redraw()
+
+    @modifies_state
+    def toggle_transform_visiblity(self, evt):
+        name = evt.GetEventObject().GetName()
+        cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
+        if name in cr.active_transformations:
+            cr.active_transformations.remove(name)
+        else:
+            cr.active_transformations.append(name)
+        self.update_transform_display()
+        self.field_panel.redraw()
+
+    def update_transform_display(self):
+        if self.main_sizer is not None:
+            self.main_sizer.Clear(True)
+        else:
+            self.main_sizer = wx.StaticBoxSizer(
+                wx.VERTICAL, self, 'Transformations'
+            )
+        cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
+        active_trans = cr.active_transformations
+        for n, t in _app_state[TFMS].items():
+            row = wx.BoxSizer(wx.HORIZONTAL)
+            lbl = wx.StaticText(self, label=n)
+            view_state = 'Active' if n in active_trans else 'Inactive'
+            print(n, view_state)
+            toggle_view = wx.Button(self, wx.ID_ANY, label=view_state, name=n)
+            delete = wx.Button(self, wx.ID_ANY, label='Delete', name=n)
+            edit_transform = wx.Button(self, wx.ID_ANY, label='...', name=n)
+            toggle_view.Bind(
+                wx.EVT_BUTTON,
+                self.toggle_transform_visiblity,
+            )
+            delete.Bind(
+                wx.EVT_BUTTON,
+                self.delete_transformation,
+            )
+
+            row.Add(lbl, wx.EXPAND)
+            row.Add(delete, wx.EXPAND, border=3)
+            row.Add(toggle_view, wx.EXPAND, border=3)
+            row.Add(edit_transform, wx.EXPAND, border=3)
+
+            self.main_sizer.Add(row, 0, wx.SHRINK | wx.ALL, border=5)
+        # self.SetBackgroundColour('blue')
+        self.SetSizerAndFit(self.main_sizer)
+        self.Layout()
+        print('ok so far')
+
+
 # A wx Panel that holds the controls on the right side, or 'control' panel
 class ControlPanel(ScrolledPanel):
     def __init__(self, parent):
         ScrolledPanel.__init__(self, parent=parent)
         self.SetupScrolling()
         self.ShowScrollbars(wx.SHOW_SB_NEVER, wx.SHOW_SB_DEFAULT)
-        self.field_panel = None
         self.active_waypoint = None
         self.highlight_waypoint = None
         self.routine_rename_in_progress = None
@@ -751,11 +824,11 @@ class ControlPanel(ScrolledPanel):
         add_transformation_btn.Bind(wx.EVT_BUTTON, self.add_transformation)
         export_profile_btn.Bind(wx.EVT_BUTTON, self.export_profile)
         self.routine_grid.Bind(wx.EVT_LIST_ITEM_SELECTED,
-                              self.on_routine_select)
+                               self.on_routine_select)
         self.routine_grid.Bind(wx.EVT_LIST_BEGIN_LABEL_EDIT,
-                              self.on_routine_name_change_begin)
+                               self.on_routine_name_change_begin)
         self.routine_grid.Bind(wx.EVT_LIST_END_LABEL_EDIT,
-                              self.on_routine_name_change_end)
+                               self.on_routine_name_change_end)
 
         # Now we pack the elements into a layout element that will size
         # and position them appropriately. This is what gets them onto the
@@ -777,9 +850,11 @@ class ControlPanel(ScrolledPanel):
         vbox.AddSpacer(8)
         vbox.Add(self.waypoint_grid, 0, wx.EXPAND | wx.ALL, border=border)
         vbox.AddSpacer(8)
-        self.transform_display = wx.BoxSizer(wx.VERTICAL)
-        self.update_transform_display()
-        vbox.Add(self.transform_display, 0, wx.SHRINK | wx.ALL, border=border)
+        global glb_transformation_panel
+        glb_transformation_panel = TransformationPanel(self)
+        vbox.Add(glb_transformation_panel, 0, wx.EXPAND | wx.ALL,
+                 border=border)
+        vbox.AddSpacer(8)
         vbox.Add(add_transformation_btn, 0, wx.EXPAND | wx.ALL, border=border)
         vbox.Add(export_profile_btn, 0, wx.EXPAND | wx.ALL, border=border)
         self.SetSizer(vbox)
@@ -793,10 +868,11 @@ class ControlPanel(ScrolledPanel):
 
         idx = 0
         for c in choices:
-            self.routine_grid.InsertStringItem(sys.maxsize, c)
+            self.routine_grid.InsertItem(sys.maxsize, c)
             if c == _app_state[CURRENT_ROUTINE]:
-                self.routine_grid.SetItemState(idx, wx.LIST_STATE_SELECTED,
-                                              wx.LIST_STATE_SELECTED)
+                self.routine_grid.SetItemState(idx,
+                                               wx.LIST_STATE_SELECTED,
+                                               wx.LIST_STATE_SELECTED)
             idx += 1
         self.Fit()
 
@@ -871,47 +947,6 @@ class ControlPanel(ScrolledPanel):
         del _app_state[ROUTINES][delname]
         self.field_panel.redraw()
         self.build_routine_choices()
-
-    def update_transform_display(self):
-        self.transform_display.Clear(True)
-        for n, t in _app_state[TFMS].items():
-            print(n)
-            row = wx.BoxSizer(wx.HORIZONTAL)
-            row.SetSizeHints(self)
-            lbl = wx.StaticText(self, label=n)
-            view_state = 'Hide' if t.visible else 'Show'
-            toggle_view = wx.Button(self, wx.ID_ANY, label=view_state, name=n)
-            delete = wx.Button(self, wx.ID_ANY, label='Delete', name=n)
-            # use lambda to bind the buttons to a function w/ predefined args
-            toggle_view.Bind(
-                wx.EVT_BUTTON,
-                self.toggle_transform_visiblity,
-            )
-            delete.Bind(
-                wx.EVT_BUTTON,
-                self.delete_transformation,
-            )
-            edit_transform = wx.Button(self, label='...')
-            row.Add(lbl, wx.SHRINK)
-            row.Add(delete, wx.SHRINK, border=3)
-            row.Add(toggle_view, wx.SHRINK, border=3)
-            row.Add(edit_transform, wx.SHRINK, border=3)
-            self.transform_display.Add(row, 0, wx.SHRINK | wx.ALL, border=0)
-        self.Fit()
-        print('ok so far')
-
-    def delete_transformation(self, evt):
-        name = evt.GetEventObject().GetName()
-        global _app_state
-        del _app_state[TFMS][name]
-        self.update_transform_display()
-        self.field_panel.redraw()
-
-    def toggle_transform_visiblity(self, evt):
-        name = evt.GetEventObject().GetName()
-        _app_state[TFMS][name].visible = not _app_state[TFMS][name].visible
-        self.update_transform_display()
-        self.field_panel.redraw()
 
     @modifies_state
     def add_transformation(self, evt):
@@ -1115,6 +1150,7 @@ class TransformDialog(wx.Dialog):
 # above mentioned Panels in the right spots
 class MainWindow(wx.Frame):
     def __init__(self, parent, id):
+        global glb_field_panel, glb_control_panel
         wx.Frame.__init__(self,
                           parent,
                           id,
@@ -1122,14 +1158,13 @@ class MainWindow(wx.Frame):
                           size=(1660, 800))
 
         self.splitter = MultiSplitterWindow(self, style=wx.SP_LIVE_UPDATE)
-        self.control_panel = ControlPanel(self.splitter)
-        self.field_panel = FieldPanel(self.splitter)
-        self.field_panel.control_panel = self.control_panel
-        self.field_panel.redraw()
-        self.control_panel.field_panel = self.field_panel
-        self.splitter.AppendWindow(self.field_panel,
-                                   sashPos=self.field_panel.w)
-        self.splitter.AppendWindow(self.control_panel)
+        glb_control_panel = ControlPanel(self.splitter)
+        glb_field_panel = FieldPanel(self.splitter)
+        glb_field_panel.redraw()
+        self.splitter.AppendWindow(glb_field_panel,
+                                   sashPos=glb_field_panel.w)
+        self.splitter.AppendWindow(glb_control_panel)
+        # self.splitter.AppendWindow(self.control_panel)
         # Window dressings like status and menu bars; not wired to anything
         status_bar = self.CreateStatusBar()
         menubar_main = wx.MenuBar()
@@ -1164,12 +1199,13 @@ def buildit():
     """
     import pathfinder as pf
     points = [
-        pf.Waypoint(-4, -1, math.radians(-45.0)),   # Waypoint @ x=-4, y=-1, exit angle=-45 degrees
-        pf.Waypoint(-2, -2, 0),                     # Waypoint @ x=-2, y=-2, exit angle=0 radians
-        pf.Waypoint(0, 0, 0),                       # Waypoint @ x=0, y=0,   exit angle=0 radians
+        pf.Waypoint(-4, -1, math.radians(-45.0)),
+        pf.Waypoint(-2, -2, 0),
+        pf.Waypoint(0, 0, 0),
     ]
 
-    info, trajectory = pf.generate(points, pf.FIT_HERMITE_CUBIC, pf.SAMPLES_HIGH,
+    info, trajectory = pf.generate(points, pf.FIT_HERMITE_CUBIC,
+                                pf.SAMPLES_HIGH,
                                 dt=0.05, # 50ms
                                 max_velocity=1.7,
                                 max_acceleration=2.0,
@@ -1180,7 +1216,7 @@ def buildit():
     code_str = 'import pathfinder as pf\n\n'
     for routine in _app_state[ROUTINES].values():
         for t in [None] + routine.active_transformations:
-            transform_name = def_trans if t is None else t.name
+            transform_name = def_trans if t is None else t
             rt = e(routine.name) + '_' + e(transform_name)
             route_str = f"""# {routine.name}
                 points_{rt} = [
@@ -1212,6 +1248,10 @@ waypoint_test_json = """
     { "heading": 0, "v": 10, "x": 45.0, "y": -15.0 }
 ]
 """
+
+glb_field_panel = None
+glb_control_panel = None
+glb_transformation_panel = None
 
 # here's how we fire up the wxPython app
 if __name__ == '__main__':
