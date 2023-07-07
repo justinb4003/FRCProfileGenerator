@@ -419,7 +419,6 @@ class FieldPanel(wx.Panel):
             # highlight node
             if last_highlight != self._highlight_node:
                 self.redraw()
-                # self.control_panel.build_waypoint_grid()
             return
         event.Skip()
         # print("Dragging position", x, y)
@@ -436,7 +435,7 @@ class FieldPanel(wx.Panel):
             waypoints[idx].x = fieldx
             waypoints[idx].y = fieldy
             print(idx, fieldx, fieldy)
-            glb_control_panel.build_waypoint_grid()
+            glb_waypoint_panel.update_waypoint_grid()
             self.redraw()
 
     def _screen_to_field(self, x, y):
@@ -691,8 +690,8 @@ class FieldPanel(wx.Panel):
             waypoints.append(new_waypoint)
         _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints = waypoints
         self._selected_node = new_waypoint
-        self.control_panel.select_waypoint(new_waypoint)
-        self.control_panel.build_waypoint_grid()
+        glb_control_panel.select_waypoint(new_waypoint)
+        glb_waypoint_panel.update_waypoint_grid()
         self.redraw()
 
     # Delete the closest waypoint to the click
@@ -703,13 +702,13 @@ class FieldPanel(wx.Panel):
         global _app_state
         print(f'Del node at {x}, {y}')
         self._selected_node = None
-        self.control_panel.select_waypoint(None)
+        glb_control_panel.select_waypoint(None)
         delnode = self._find_closest_waypoint(x, y)
         current_routine = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         if delnode is not None:
             current_routine.waypoints.remove(delnode)
             self.redraw()
-            self.control_panel.build_waypoint_grid()
+            glb_waypoint_panel.update_waypoint_grid()
 
     # select the closest waypoint to the click for modification
     # via the controls in the control panel UI
@@ -718,8 +717,66 @@ class FieldPanel(wx.Panel):
         selnode = self._find_closest_waypoint(x, y)
         if selnode is not None:
             self._selected_node = selnode
-            self.control_panel.select_waypoint(selnode)
+            glb_control_panel.select_waypoint(selnode)
         self.redraw()
+
+
+class WaypointPanel(wx.Panel):
+
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent=parent)
+        self.waypoint_grid = None
+        self.update_waypoint_grid()
+
+    def update_waypoint_grid(self):
+        if self.waypoint_grid is not None:
+            self.waypoint_grid.Clear(True)
+        else:
+            self.waypoint_grid = wx.StaticBoxSizer(
+                wx.VERTICAL, self, 'Waypoints'
+            )
+        routine = _app_state[CURRENT_ROUTINE]
+        waypoints = _app_state[ROUTINES][routine].waypoints
+        idx = 0
+        spacing = 4
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        for w in waypoints:
+            # Create a box for each waypoint
+            wbox = wx.BoxSizer(wx.HORIZONTAL)
+            x_txt = wx.TextCtrl(self)
+            x_txt.ChangeValue(str(w.x))
+            y_txt = wx.TextCtrl(self)
+            y_txt.ChangeValue(str(w.y))
+            del_btn = wx.Button(self, name=str(idx), label='-', size=(35, -1))
+            del_btn.Bind(wx.EVT_BUTTON, self.on_waypoint_delete)
+            wbox.Add(wx.StaticText(self, label=f'{idx}'), 0, wx.EXPAND)
+            wbox.AddSpacer(spacing)
+            wbox.Add(x_txt, 0, wx.EXPAND)
+            wbox.AddSpacer(spacing)
+            wbox.Add(y_txt, 0, wx.EXPAND)
+            wbox.AddSpacer(spacing)
+            wbox.Add(del_btn, 0, wx.SHRINK)
+
+            # Add that waypoint to our vertical list
+            vbox.Add(wbox, 0, wx.EXPAND)
+            vbox.AddSpacer(spacing)
+            idx += 1
+        # Add the vertila list into the 'grid' area we have for the list
+        self.waypoint_grid.Add(vbox)
+        # Force it to put the widgets in the right spots with an internal
+        # calculation.
+        self.SetSizerAndFit(self.waypoint_grid)
+        self.Layout()
+        self.Update()
+
+
+    # Delete a node based on a UI event from our waypoint "grid"
+    @modifies_state
+    def on_waypoint_delete(self, evt):
+        idx = int(evt.GetEventObject().GetName())
+        del _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints[idx]
+        self.field_panel.redraw()
+        self.build_waypoint_grid()
 
 
 class TransformationPanel(wx.Panel):
@@ -812,9 +869,6 @@ class ControlPanel(ScrolledPanel):
 
         self.build_routine_choices()
 
-        self.waypoint_grid = wx.BoxSizer(wx.VERTICAL)
-        self.build_waypoint_grid()
-
         # Now we 'bind' events from the controls to functions within the
         # application that can handle them.
         # Button click events
@@ -848,15 +902,21 @@ class ControlPanel(ScrolledPanel):
         vbox.Add(routine_box)
         vbox.Add(self.routine_grid, 0, wx.EXPAND | wx.ALL, border=border)
         vbox.AddSpacer(8)
-        vbox.Add(self.waypoint_grid, 0, wx.EXPAND | wx.ALL, border=border)
+
+        global glb_waypoint_panel
+        glb_waypoint_panel = WaypointPanel(self)
+        vbox.Add(glb_waypoint_panel, 0, wx.EXPAND | wx.ALL, border=border)
         vbox.AddSpacer(8)
+
         global glb_transformation_panel
         glb_transformation_panel = TransformationPanel(self)
         vbox.Add(glb_transformation_panel, 0, wx.EXPAND | wx.ALL,
                  border=border)
+
         vbox.AddSpacer(8)
         vbox.Add(add_transformation_btn, 0, wx.EXPAND | wx.ALL, border=border)
         vbox.Add(export_profile_btn, 0, wx.EXPAND | wx.ALL, border=border)
+
         self.SetSizer(vbox)
         self.Fit()
 
@@ -875,49 +935,6 @@ class ControlPanel(ScrolledPanel):
                                                wx.LIST_STATE_SELECTED)
             idx += 1
         self.Fit()
-
-    def build_waypoint_grid(self):
-        self.waypoint_grid.Clear(True)
-        routine = _app_state[CURRENT_ROUTINE]
-        waypoints = _app_state[ROUTINES][routine].waypoints
-        idx = 0
-        spacing = 4
-        vbox = wx.BoxSizer(wx.VERTICAL)
-        for w in waypoints:
-            # Create a box for each waypoint
-            wbox = wx.BoxSizer(wx.HORIZONTAL)
-            x_txt = wx.TextCtrl(self)
-            x_txt.ChangeValue(str(w.x))
-            y_txt = wx.TextCtrl(self)
-            y_txt.ChangeValue(str(w.y))
-            del_btn = wx.Button(self, name=str(idx), label='-', size=(35, -1))
-            del_btn.Bind(wx.EVT_BUTTON, self.on_waypoint_delete)
-            wbox.Add(wx.StaticText(self, label=f'{idx}'), 0, wx.EXPAND)
-            wbox.AddSpacer(spacing)
-            wbox.Add(x_txt, 0, wx.EXPAND)
-            wbox.AddSpacer(spacing)
-            wbox.Add(y_txt, 0, wx.EXPAND)
-            wbox.AddSpacer(spacing)
-            wbox.Add(del_btn, 0, wx.SHRINK)
-
-            # Add that waypoint to our vertical list
-            vbox.Add(wbox, 0, wx.EXPAND)
-            vbox.AddSpacer(spacing)
-            idx += 1
-        # Add the vertila list into the 'grid' area we have for the list
-        self.waypoint_grid.Add(vbox)
-        # Force it to put the widgets in the right spots with an internal
-        # calculation.
-        self.Layout()
-        self.Update()
-
-    # Delete a node based on a UI event from our waypoint "grid"
-    @modifies_state
-    def on_waypoint_delete(self, evt):
-        idx = int(evt.GetEventObject().GetName())
-        del _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints[idx]
-        self.field_panel.redraw()
-        self.build_waypoint_grid()
 
     @modifies_state
     def on_routine_new(self, evt):
@@ -1164,7 +1181,6 @@ class MainWindow(wx.Frame):
         self.splitter.AppendWindow(glb_field_panel,
                                    sashPos=glb_field_panel.w)
         self.splitter.AppendWindow(glb_control_panel)
-        # self.splitter.AppendWindow(self.control_panel)
         # Window dressings like status and menu bars; not wired to anything
         status_bar = self.CreateStatusBar()
         menubar_main = wx.MenuBar()
@@ -1252,6 +1268,7 @@ waypoint_test_json = """
 glb_field_panel = None
 glb_control_panel = None
 glb_transformation_panel = None
+glb_waypoint_panel = None
 
 # here's how we fire up the wxPython app
 if __name__ == '__main__':
