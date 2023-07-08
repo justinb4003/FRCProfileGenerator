@@ -880,9 +880,7 @@ class WaypointPanel(wx.Panel):
             # Create a box for each waypoint
             wbox = wx.BoxSizer(wx.HORIZONTAL)
             x_txt = wx.TextCtrl(self)
-            x_txt.ChangeValue(str(w.x))
             y_txt = wx.TextCtrl(self)
-            y_txt.ChangeValue(str(w.y))
             self.waypoint_x_list.append(x_txt)
             self.waypoint_y_list.append(y_txt)
             del_btn = wx.Button(self, name=str(idx), label='-', size=(35, -1))
@@ -895,12 +893,12 @@ class WaypointPanel(wx.Panel):
             wbox.AddSpacer(spacing)
             wbox.Add(del_btn, 0, wx.SHRINK)
 
-
             # Add that waypoint to our vertical list
             vbox.Add(wbox, 0, wx.EXPAND)
             vbox.AddSpacer(spacing)
             idx += 1
-        # Add the vertila list into the 'grid' area we have for the list
+        self.update_waypoint_data()
+        # Add the vertical list into the 'grid' area we have for the list
         self.waypoint_grid.Add(vbox)
         # Force it to put the widgets in the right spots with an internal
         # calculation.
