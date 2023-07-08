@@ -881,6 +881,8 @@ class WaypointPanel(wx.Panel):
             wbox = wx.BoxSizer(wx.HORIZONTAL)
             x_txt = wx.TextCtrl(self)
             y_txt = wx.TextCtrl(self)
+            x_txt.Bind(wx.EVT_TEXT, self.on_waypoint_change_x)
+            y_txt.Bind(wx.EVT_TEXT, self.on_waypoint_change_y)
             self.waypoint_x_list.append(x_txt)
             self.waypoint_y_list.append(y_txt)
             del_btn = wx.Button(self, name=str(idx), label='-', size=(35, -1))
@@ -905,6 +907,30 @@ class WaypointPanel(wx.Panel):
         self.SetSizerAndFit(self.waypoint_grid)
         self.Layout()
         self.Update()
+
+    @modifies_state
+    def on_waypoint_change_x(self, evt):
+        routine = _app_state[CURRENT_ROUTINE]
+        waypoints = _app_state[ROUTINES][routine].waypoints
+        for idx, w in enumerate(waypoints):
+            try:
+                newx = float(self.waypoint_x_list[idx].GetValue())
+                w.x = newx
+            except ValueError:
+                print('Using old value of x, input is invalid')
+        glb_field_panel.redraw()
+
+    @modifies_state
+    def on_waypoint_change_y(self, evt):
+        routine = _app_state[CURRENT_ROUTINE]
+        waypoints = _app_state[ROUTINES][routine].waypoints
+        for idx, w in enumerate(waypoints):
+            try:
+                newy = float(self.waypoint_y_list[idx].GetValue())
+                w.y = newy
+            except ValueError:
+                print('Using old value of x, input is invalid')
+        glb_field_panel.redraw()
 
     # Delete a node based on a UI event from our waypoint "grid"
     @modifies_state
@@ -1049,37 +1075,6 @@ class ControlPanel(ScrolledPanel):
             parent=None, message='Data exported to clipoboard'
         ).ShowModal()
         pass
-
-    @modifies_state
-    def on_waypoint_change(self, evt):
-        if self.active_waypoint is None:
-            return
-        try:
-            newx = float(self.waypoint_x.GetValue())
-            self.active_waypoint.x = newx
-        except ValueError:
-            print('Using old value of x, input is invalid')
-
-        try:
-            newy = float(self.waypoint_y.GetValue())
-            self.active_waypoint.y = newy
-        except ValueError:
-            print('Using old value of y, input is invalid')
-
-        try:
-            newv = float(self.waypoint_v.GetValue() or 10)
-            self.active_waypoint.v = newv
-        except ValueError:
-            print('Using old value of v, input is invalid')
-
-        try:
-            newheading = float(self.waypoint_heading.GetValue() or 0)
-            self.active_waypoint.heading = newheading
-        except ValueError:
-            print('Using old value of heading, input is invalid')
-
-        glb_field_panel.redraw()
-
 
 class TransformDialog(wx.Dialog):
 
