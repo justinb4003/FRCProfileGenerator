@@ -898,7 +898,6 @@ class WaypointPanel(wx.Panel):
         self.Layout()
         self.Update()
 
-
     # Delete a node based on a UI event from our waypoint "grid"
     @modifies_state
     def on_waypoint_delete(self, evt):
@@ -988,7 +987,6 @@ class ControlPanel(ScrolledPanel):
         add_transformation_btn = wx.Button(self,
                                            label='Add Transformation')
 
-
         # Now we 'bind' events from the controls to functions within the
         # application that can handle them.
         # Button click events
@@ -1022,7 +1020,6 @@ class ControlPanel(ScrolledPanel):
 
         self.SetSizer(vbox)
         self.Fit()
-
 
     @modifies_state
     def add_transformation(self, evt):
