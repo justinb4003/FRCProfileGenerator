@@ -427,7 +427,6 @@ class FieldPanel(wx.Panel):
         if self._selected_node is not None:
             self._selected_node.x = fieldx
             self._selected_node.y = fieldy
-            glb_control_panel.select_waypoint(self._selected_node)
             waypoints = (
                 _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints
             )
@@ -435,7 +434,7 @@ class FieldPanel(wx.Panel):
             waypoints[idx].x = fieldx
             waypoints[idx].y = fieldy
             print(idx, fieldx, fieldy)
-            glb_waypoint_panel.update_waypoint_grid()
+            glb_waypoint_panel.update_waypoint_data()
             self.redraw()
 
     def _screen_to_field(self, x, y):
@@ -690,7 +689,6 @@ class FieldPanel(wx.Panel):
             waypoints.append(new_waypoint)
         _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints = waypoints
         self._selected_node = new_waypoint
-        glb_control_panel.select_waypoint(new_waypoint)
         glb_waypoint_panel.update_waypoint_grid()
         self.redraw()
 
@@ -702,7 +700,6 @@ class FieldPanel(wx.Panel):
         global _app_state
         print(f'Del node at {x}, {y}')
         self._selected_node = None
-        glb_control_panel.select_waypoint(None)
         delnode = self._find_closest_waypoint(x, y)
         current_routine = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         if delnode is not None:
@@ -717,7 +714,6 @@ class FieldPanel(wx.Panel):
         selnode = self._find_closest_waypoint(x, y)
         if selnode is not None:
             self._selected_node = selnode
-            glb_control_panel.select_waypoint(selnode)
         self.redraw()
 
 
@@ -855,7 +851,16 @@ class WaypointPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent=parent)
         self.waypoint_grid = None
+        self.waypoint_x_list = []
+        self.waypoint_y_list = []
         self.update_waypoint_grid()
+
+    def update_waypoint_data(self):
+        routine = _app_state[CURRENT_ROUTINE]
+        waypoints = _app_state[ROUTINES][routine].waypoints
+        for idx, w in enumerate(waypoints):
+            self.waypoint_x_list[idx].ChangeValue(str(w.x))
+            self.waypoint_y_list[idx].ChangeValue(str(w.y))
 
     def update_waypoint_grid(self):
         if self.waypoint_grid is not None:
@@ -869,6 +874,8 @@ class WaypointPanel(wx.Panel):
         idx = 0
         spacing = 4
         vbox = wx.BoxSizer(wx.VERTICAL)
+        self.waypoint_x_list = []
+        self.waypoint_y_list = []
         for w in waypoints:
             # Create a box for each waypoint
             wbox = wx.BoxSizer(wx.HORIZONTAL)
@@ -876,6 +883,8 @@ class WaypointPanel(wx.Panel):
             x_txt.ChangeValue(str(w.x))
             y_txt = wx.TextCtrl(self)
             y_txt.ChangeValue(str(w.y))
+            self.waypoint_x_list.append(x_txt)
+            self.waypoint_y_list.append(y_txt)
             del_btn = wx.Button(self, name=str(idx), label='-', size=(35, -1))
             del_btn.Bind(wx.EVT_BUTTON, self.on_waypoint_delete)
             wbox.Add(wx.StaticText(self, label=f'{idx}'), 0, wx.EXPAND)
@@ -885,6 +894,7 @@ class WaypointPanel(wx.Panel):
             wbox.Add(y_txt, 0, wx.EXPAND)
             wbox.AddSpacer(spacing)
             wbox.Add(del_btn, 0, wx.SHRINK)
+
 
             # Add that waypoint to our vertical list
             vbox.Add(wbox, 0, wx.EXPAND)
@@ -1037,28 +1047,10 @@ class ControlPanel(ScrolledPanel):
     # TODO: Not complete at all yet.
     def export_profile(self, evt):
         buildit()
-        """
         wx.MessageDialog(
             parent=None, message='Data exported to clipoboard'
         ).ShowModal()
-        """
         pass
-
-    def select_waypoint(self, waypoint: Waypoint):
-        # TODO: Change how this works entirely to use a grid
-        return
-        if waypoint is not None:
-            self.waypoint_x.ChangeValue(str(waypoint.x))
-            self.waypoint_y.ChangeValue(str(waypoint.y))
-            self.waypoint_v.ChangeValue(str(waypoint.v))
-            self.waypoint_heading.ChangeValue(str(waypoint.heading))
-        else:
-            self.waypoint_x.ChangeValue('')
-            self.waypoint_y.ChangeValue('')
-            self.waypoint_v.ChangeValue('')
-            self.waypoint_heading.ChangeValue('')
-
-        self.active_waypoint = waypoint
 
     @modifies_state
     def on_waypoint_change(self, evt):
