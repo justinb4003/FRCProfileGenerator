@@ -338,6 +338,7 @@ class FieldPanel(wx.Panel):
                                          bitmap=field,
                                          pos=(0, 0),
                                          size=(self.w, self.h))
+        self.field_bmp.SetScaleMode(2)
         # Here any click that happens inside the field area will trigger the
         # on_field_click function which handles the event.
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
@@ -407,6 +408,7 @@ class FieldPanel(wx.Panel):
     def on_mouse_move(self, event):
         x, y = event.GetPosition()
         fieldx, fieldy = self._screen_to_field(x, y)
+        print(f'x: {x}, y: {y} fieldx: {fieldx}, fieldy: {fieldy}')
 
         # If we're not dragging an object/waypoint then we're just going to
         # see if the mouse is near a node. If so, we'll highlight it to
@@ -441,18 +443,29 @@ class FieldPanel(wx.Panel):
         # TODO: Make this linear algebra
         # 640 is center for x
         # 300 is center for y
-        x -= 640
-        y -= 300
+        size = glb_field_panel.field_bmp.GetSize()
+        xoff = (size[0] - 10) / 2
+        yoff = (size[1] - 20) / 2
+        print(xoff, yoff)
+        x -= xoff
+        y -= yoff
         x /= 2
         y /= 2
         return x, y
 
     def _field_to_screen(self, x, y):
         # TODO: Make this linear algebra
+        if glb_field_panel is not None and glb_field_panel.field_bmp is not None:
+            size = glb_field_panel.field_bmp.GetSize()
+            xoff = (size[0] - 10) / 2
+            yoff = (size[1] - 20) / 2
+        else:
+            xoff = 640
+            yoff = 300
         x *= 2
         y *= 2
-        x += 640
-        y += 300
+        x += xoff
+        y += yoff
         return int(x), int(y)
 
     @modifies_state
@@ -613,8 +626,14 @@ class FieldPanel(wx.Panel):
     def redraw(self):
         imgname = _app_state[FIELD_BACKGROUND_IMAGE]
         imgpath = resource_path(imgname)
-        field_blank = wx.Image(imgpath,
-                               wx.BITMAP_TYPE_ANY).ConvertToBitmap()
+        field_blank = (
+            wx.Image(imgpath, wx.BITMAP_TYPE_ANY)
+        )
+        if self.field_bmp is not None:
+            imgx, imgy = self.field_bmp.GetSize()
+            print('Scaling', imgx, imgy)
+            field_blank = field_blank.Scale(imgx, imgy)
+        field_blank = field_blank.ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
         if self.draw_field_center:
             self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
@@ -1192,11 +1211,15 @@ class MainWindow(wx.Frame):
         self.splitter.AppendWindow(glb_field_panel,
                                    sashPos=glb_field_panel.w)
         self.splitter.AppendWindow(glb_control_panel)
+        self.splitter.Bind(wx.EVT_SPLITTER_SASH_POS_CHANGING, self.on_sash_drag)
         # Window dressings like status and menu bars; not wired to anything
         status_bar = self.CreateStatusBar()
         menubar_main = wx.MenuBar()
         self.SetMenuBar(menubar_main)
         self.SetStatusBar(status_bar)
+
+    def on_sash_drag(self, evt):
+        glb_field_panel.redraw()
 
     def close_window(self, event):
         self.Destroy()
