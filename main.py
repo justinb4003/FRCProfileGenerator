@@ -721,6 +721,135 @@ class FieldPanel(wx.Panel):
         self.redraw()
 
 
+class RoutinePanel(wx.Panel):
+
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent=parent)
+        self.routine_grid = None
+
+        self.update_routine_grid()
+
+    def update_routine_grid(self):
+        if self.routine_grid is not None:
+            self.routine_grid.Clear(True)
+        else:
+            self.routine_grid = wx.StaticBoxSizer(
+                wx.VERTICAL, self, 'Routines'
+            )
+
+        self.routine_new_btn = wx.Button(self, label='+ Blank')
+        self.routine_clone_btn = wx.Button(self, label='+ Clone')
+        self.routine_delete_btn = wx.Button(self, label='Delete')
+        self.routine_new_btn.Bind(wx.EVT_BUTTON, self.on_routine_new)
+        self.routine_clone_btn.Bind(wx.EVT_BUTTON, self.on_routine_clone)
+        self.routine_delete_btn.Bind(wx.EVT_BUTTON, self.on_routine_delete)
+
+        gridstyle = wx.LC_REPORT | wx.LC_EDIT_LABELS | wx.LC_SINGLE_SEL
+        self.routine_list = wx.ListCtrl(self, style=gridstyle)
+        self.routine_list.AppendColumn('Routine Name')
+        self.routine_list.SetColumnWidth(0, 200)
+        self.routine_list.Bind(wx.EVT_LIST_ITEM_SELECTED,
+                               self.on_routine_select)
+        self.routine_list.Bind(wx.EVT_LIST_BEGIN_LABEL_EDIT,
+                               self.on_routine_name_change_begin)
+        self.routine_list.Bind(wx.EVT_LIST_END_LABEL_EDIT,
+                               self.on_routine_name_change_end)
+        border = 5
+        button_grid = wx.BoxSizer(wx.HORIZONTAL)
+        button_grid.Add(self.routine_new_btn, 0, wx.EXPAND | wx.ALL,
+                        border=border)
+        button_grid.AddSpacer(4)
+        button_grid.Add(self.routine_clone_btn, 0, wx.EXPAND | wx.ALL,
+                        border=border)
+        button_grid.AddSpacer(4)
+        button_grid.Add(self.routine_delete_btn, 0, wx.EXPAND | wx.ALL,
+                        border=border)
+        self.routine_grid.Add(button_grid, 0, wx.EXPAND | wx.ALL,
+                              border=border)
+        self.routine_grid.AddSpacer(4)
+        self.routine_grid.Add(self.routine_list, 1, wx.EXPAND | wx.ALL,)
+        self.build_routine_choices()
+        self.SetSizerAndFit(self.routine_grid)
+        self.Layout()
+        self.Update()
+        if glb_control_panel is not None:
+            glb_control_panel.Layout()
+            glb_control_panel.Update()
+
+    def build_routine_choices(self):
+        self.routine_list.DeleteAllItems()
+        choices = [
+            r for r in _app_state[ROUTINES].keys()
+        ]
+
+        idx = 0
+        for c in choices:
+            self.routine_list.InsertItem(sys.maxsize, c)
+            if c == _app_state[CURRENT_ROUTINE]:
+                self.routine_list.SetItemState(idx,
+                                               wx.LIST_STATE_SELECTED,
+                                               wx.LIST_STATE_SELECTED)
+            idx += 1
+        self.Fit()
+
+    @modifies_state
+    def on_routine_new(self, evt):
+        newRoutine = Routine()
+        newRoutine.name = 'New Routine'
+        _app_state[ROUTINES][newRoutine.name] = newRoutine
+        _app_state[CURRENT_ROUTINE] = newRoutine.name
+        self.update_routine_grid()
+        pass
+
+    @modifies_state
+    def on_routine_clone(self, evt):
+        clone = copy.deepcopy(
+            _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
+        )
+        clone.name = f'{clone.name} (clone)'
+        _app_state[ROUTINES][clone.name] = clone
+        _app_state[CURRENT_ROUTINE] = clone.name
+        self.update_routine_grid()
+
+    @modifies_state
+    def on_routine_delete(self, evt):
+        delname = _app_state[CURRENT_ROUTINE]
+        _app_state[CURRENT_ROUTINE] = list(_app_state[ROUTINES].keys())[0]
+        del _app_state[ROUTINES][delname]
+        self.update_routine_grid()
+
+    @modifies_state
+    def on_routine_select(self, evt):
+        routine = evt.GetLabel()
+        _app_state[CURRENT_ROUTINE] = routine
+        print(f'Selected routine {routine}')
+        glb_field_panel.redraw()
+        glb_waypoint_panel.update_waypoint_grid()
+
+    def on_routine_name_change_begin(self, evt):
+        print('begin name change')
+        self.routine_rename_in_progress = evt.GetLabel()
+        print(evt.GetLabel())
+
+    @modifies_state
+    def on_routine_name_change_end(self, evt):
+        print('name change')
+        newlabel = evt.GetLabel()
+        oldlabel = self.routine_rename_in_progress
+
+        if newlabel == oldlabel:
+            print('no rename needed')
+            return
+
+        print(f'Rename {oldlabel} to {newlabel}')
+        r = _app_state[ROUTINES][oldlabel]
+        del _app_state[ROUTINES][oldlabel]
+        r.name = newlabel
+        _app_state[ROUTINES][newlabel] = r
+        if _app_state[CURRENT_ROUTINE] == oldlabel:
+            _app_state[CURRENT_ROUTINE] = newlabel
+
+
 class WaypointPanel(wx.Panel):
 
     def __init__(self, parent):
@@ -775,8 +904,8 @@ class WaypointPanel(wx.Panel):
     def on_waypoint_delete(self, evt):
         idx = int(evt.GetEventObject().GetName())
         del _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints[idx]
-        self.field_panel.redraw()
-        self.build_waypoint_grid()
+        glb_field_panel.redraw()
+        glb_waypoint_panel.update_waypoint_grid()
 
 
 class TransformationPanel(wx.Panel):
@@ -792,7 +921,7 @@ class TransformationPanel(wx.Panel):
         global _app_state
         del _app_state[TFMS][name]
         self.update_transform_display()
-        self.field_panel.redraw()
+        glb_field_panel.redraw()
 
     @modifies_state
     def toggle_transform_visiblity(self, evt):
@@ -803,7 +932,7 @@ class TransformationPanel(wx.Panel):
         else:
             cr.active_transformations.append(name)
         self.update_transform_display()
-        self.field_panel.redraw()
+        glb_field_panel.redraw()
 
     def update_transform_display(self):
         if self.main_sizer is not None:
@@ -859,30 +988,12 @@ class ControlPanel(ScrolledPanel):
         add_transformation_btn = wx.Button(self,
                                            label='Add Transformation')
 
-        self.routine_new_btn = wx.Button(self, label='+ Blank')
-        self.routine_clone_btn = wx.Button(self, label='+ Clone')
-        self.routine_delete_btn = wx.Button(self, label='Delete')
-        gridstyle = wx.LC_REPORT | wx.LC_EDIT_LABELS | wx.LC_SINGLE_SEL
-        self.routine_grid = wx.ListCtrl(self, style=gridstyle)
-        self.routine_grid.AppendColumn('Routine Name')
-        self.routine_grid.SetColumnWidth(0, 200)
-
-        self.build_routine_choices()
 
         # Now we 'bind' events from the controls to functions within the
         # application that can handle them.
         # Button click events
-        self.routine_new_btn.Bind(wx.EVT_BUTTON, self.on_routine_new)
-        self.routine_clone_btn.Bind(wx.EVT_BUTTON, self.on_routine_clone)
-        self.routine_delete_btn.Bind(wx.EVT_BUTTON, self.on_routine_delete)
         add_transformation_btn.Bind(wx.EVT_BUTTON, self.add_transformation)
         export_profile_btn.Bind(wx.EVT_BUTTON, self.export_profile)
-        self.routine_grid.Bind(wx.EVT_LIST_ITEM_SELECTED,
-                               self.on_routine_select)
-        self.routine_grid.Bind(wx.EVT_LIST_BEGIN_LABEL_EDIT,
-                               self.on_routine_name_change_begin)
-        self.routine_grid.Bind(wx.EVT_LIST_END_LABEL_EDIT,
-                               self.on_routine_name_change_end)
 
         # Now we pack the elements into a layout element that will size
         # and position them appropriately. This is what gets them onto the
@@ -890,17 +1001,9 @@ class ControlPanel(ScrolledPanel):
         vbox = wx.BoxSizer(wx.VERTICAL)
         border = 5
 
-        routine_box = wx.BoxSizer(wx.HORIZONTAL)
-        routine_box.Add(self.routine_new_btn, 0, wx.EXPAND | wx.ALL,
-                        border=border)
-        routine_box.AddSpacer(4)
-        routine_box.Add(self.routine_clone_btn, 0, wx.EXPAND | wx.ALL,
-                        border=border)
-        routine_box.AddSpacer(4)
-        routine_box.Add(self.routine_delete_btn, 0, wx.EXPAND | wx.ALL,
-                        border=border)
-        vbox.Add(routine_box)
-        vbox.Add(self.routine_grid, 0, wx.EXPAND | wx.ALL, border=border)
+        global glb_routine_panel
+        glb_routine_panel = RoutinePanel(self)
+        vbox.Add(glb_routine_panel, 0, wx.EXPAND | wx.ALL, border=border)
         vbox.AddSpacer(8)
 
         global glb_waypoint_panel
@@ -920,50 +1023,6 @@ class ControlPanel(ScrolledPanel):
         self.SetSizer(vbox)
         self.Fit()
 
-    def build_routine_choices(self):
-        self.routine_grid.DeleteAllItems()
-        choices = [
-            r for r in _app_state[ROUTINES].keys()
-        ]
-
-        idx = 0
-        for c in choices:
-            self.routine_grid.InsertItem(sys.maxsize, c)
-            if c == _app_state[CURRENT_ROUTINE]:
-                self.routine_grid.SetItemState(idx,
-                                               wx.LIST_STATE_SELECTED,
-                                               wx.LIST_STATE_SELECTED)
-            idx += 1
-        self.Fit()
-
-    @modifies_state
-    def on_routine_new(self, evt):
-        newRoutine = Routine()
-        newRoutine.name = 'New Routine'
-        _app_state[ROUTINES][newRoutine.name] = newRoutine
-        _app_state[CURRENT_ROUTINE] = newRoutine.name
-        self.field_panel.redraw()
-        self.build_routine_choices()
-        pass
-
-    @modifies_state
-    def on_routine_clone(self, evt):
-        clone = copy.deepcopy(
-            _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
-        )
-        clone.name = f'{clone.name} (clone)'
-        _app_state[ROUTINES][clone.name] = clone
-        _app_state[CURRENT_ROUTINE] = clone.name
-        self.field_panel.redraw()
-        self.build_routine_choices()
-
-    @modifies_state
-    def on_routine_delete(self, evt):
-        delname = _app_state[CURRENT_ROUTINE]
-        _app_state[CURRENT_ROUTINE] = list(_app_state[ROUTINES].keys())[0]
-        del _app_state[ROUTINES][delname]
-        self.field_panel.redraw()
-        self.build_routine_choices()
 
     @modifies_state
     def add_transformation(self, evt):
@@ -974,7 +1033,7 @@ class ControlPanel(ScrolledPanel):
             print('Got a transformation', t.name)
             for s in t.steps:
                 print(s.descr)
-        self.field_panel.redraw()
+        glb_field_panel.redraw()
         self.update_transform_display()
         dlg.Destroy()
 
@@ -1032,38 +1091,7 @@ class ControlPanel(ScrolledPanel):
         except ValueError:
             print('Using old value of heading, input is invalid')
 
-        self.field_panel.redraw()
-
-    @modifies_state
-    def on_routine_select(self, evt):
-        routine = evt.GetLabel()
-        _app_state[CURRENT_ROUTINE] = routine
-        print(f'Selected routine {routine}')
-        self.field_panel.redraw()
-        self.build_waypoint_grid()
-
-    def on_routine_name_change_begin(self, evt):
-        print('begin name change')
-        self.routine_rename_in_progress = evt.GetLabel()
-        print(evt.GetLabel())
-
-    @modifies_state
-    def on_routine_name_change_end(self, evt):
-        print('name change')
-        newlabel = evt.GetLabel()
-        oldlabel = self.routine_rename_in_progress
-
-        if newlabel == oldlabel:
-            print('no rename needed')
-            return
-
-        print(f'Rename {oldlabel} to {newlabel}')
-        r = _app_state[ROUTINES][oldlabel]
-        del _app_state[ROUTINES][oldlabel]
-        r.name = newlabel
-        _app_state[ROUTINES][newlabel] = r
-        if _app_state[CURRENT_ROUTINE] == oldlabel:
-            _app_state[CURRENT_ROUTINE] = newlabel
+        glb_field_panel.redraw()
 
 
 class TransformDialog(wx.Dialog):
@@ -1269,6 +1297,7 @@ glb_field_panel = None
 glb_control_panel = None
 glb_transformation_panel = None
 glb_waypoint_panel = None
+glb_routine_panel = None
 
 # here's how we fire up the wxPython app
 if __name__ == '__main__':
