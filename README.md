@@ -32,4 +32,4 @@ pip install -r requirements.txt
 ```
 python main.py
 ```
-![Application screenshot showing Charged Up game field in one panel with control elements in another.](https://github.com/justinb4003/FRCProfileGenerator/assets/16728804/a4c3dc45-dea7-4e7e-bbc4-7c758e79731b)
+![Application screenshot showing Charged Up game field in one panel with control elements in another.](https://github.com/justinb4003/FRCProfileGenerator/assets/16728804/96c205f5-2f59-484b-b8e1-dc89cec25f7f)
