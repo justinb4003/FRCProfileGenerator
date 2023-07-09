@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from datetime import date, time
 import os
 import wx
 import sys
@@ -9,12 +8,13 @@ import math
 import jsonpickle
 import numpy as np
 
-from inspect import cleandoc
-from copy import deepcopy
-from math import sqrt, cos, sin, radians
 from typing import List
-from wx.lib.splitter import MultiSplitterWindow
+from copy import deepcopy
+from inspect import cleandoc
+from datetime import date, time
+from math import sqrt, cos, sin, radians
 from wx.lib.scrolledpanel import ScrolledPanel
+from wx.lib.splitter import MultiSplitterWindow
 
 # Using flake8 for linting
 
@@ -338,7 +338,6 @@ class FieldPanel(wx.Panel):
                                          bitmap=field,
                                          pos=(0, 0),
                                          size=(self.w, self.h))
-        self.field_bmp.SetScaleMode(2)
         # Here any click that happens inside the field area will trigger the
         # on_field_click function which handles the event.
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
@@ -455,8 +454,8 @@ class FieldPanel(wx.Panel):
 
     def _field_to_screen(self, x, y):
         # TODO: Make this linear algebra
-        if glb_field_panel is not None and glb_field_panel.field_bmp is not None:
-            size = glb_field_panel.field_bmp.GetSize()
+        if self.field_bmp is not None:
+            size = self.field_bmp.GetSize()
             xoff = (size[0] - 10) / 2
             yoff = (size[1] - 20) / 2
         else:
@@ -631,7 +630,6 @@ class FieldPanel(wx.Panel):
         )
         if self.field_bmp is not None:
             imgx, imgy = self.field_bmp.GetSize()
-            print('Scaling', imgx, imgy)
             field_blank = field_blank.Scale(imgx, imgy)
         field_blank = field_blank.ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
@@ -651,19 +649,29 @@ class FieldPanel(wx.Panel):
                         mtx = np.dot(np.array(s.matrix), mtx)
                     if s.vector is not None:
                         trans_vec += np.array(s.vector)
+                # Create a vector of field waypoints
                 vec = np.array([w.x, w.y])
+                # Subtract the field offset to translate it to the new origin
                 vec -= np.array([_app_state[FIELD_X_OFFSET],
                                  _app_state[FIELD_Y_OFFSET]])
+                # Apply any matrix transformation to it or just use the
+                # identity matrix in mtx from above.
                 vec = np.dot(mtx, vec)
+                # Add the field offset back in
                 vec += np.array([_app_state[FIELD_X_OFFSET],
                                  _app_state[FIELD_Y_OFFSET]])
+                # Now make any final translation to the vector. If none is
+                # defined we'll juse add the zero vector to it that we defined
+                # in trans_vec above.
                 vec += trans_vec
                 x, y = self._field_to_screen(vec[0], vec[1])
                 self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
 
+        # We can't draw the path until we have at least three waypoints
         if len(_current_waypoints()) > 2:
             self._draw_path(dc)
 
+        # Blast the map back onto the screen with everything drawn
         del dc
         self.field_bmp.SetBitmap(field_blank)
 
@@ -1204,6 +1212,7 @@ class MainWindow(wx.Frame):
                           'Profile Generation',
                           size=(1660, 800))
 
+        self.SetIcon(wx.Icon('assets/web/favicon.ico', wx.BITMAP_TYPE_ICO))
         self.splitter = MultiSplitterWindow(self, style=wx.SP_LIVE_UPDATE)
         glb_control_panel = ControlPanel(self.splitter)
         glb_field_panel = FieldPanel(self.splitter)
@@ -1211,7 +1220,8 @@ class MainWindow(wx.Frame):
         self.splitter.AppendWindow(glb_field_panel,
                                    sashPos=glb_field_panel.w)
         self.splitter.AppendWindow(glb_control_panel)
-        self.splitter.Bind(wx.EVT_SPLITTER_SASH_POS_CHANGING, self.on_sash_drag)
+        self.splitter.Bind(wx.EVT_SPLITTER_SASH_POS_CHANGING,
+                           self.on_sash_drag)
         # Window dressings like status and menu bars; not wired to anything
         status_bar = self.CreateStatusBar()
         menubar_main = wx.MenuBar()
