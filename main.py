@@ -19,72 +19,40 @@ from wx.lib.splitter import MultiSplitterWindow
 # Using flake8 for linting
 
 
-def get_transform_center_basis_to_screen():
+# Round off a value to the nearest quarter. Handy since we're dealing with
+# inches and this can be used when we calculate the field position that
+# corresponds to a mouse click on the sceen.
+def qtr_round(x):
+    return round(x*4)/4
+
+
+# Constants that aren't likely to change:
+FIELD_X_INCHES = 54*12
+FIELD_Y_INCHES = 27*12
+
+
+def get_scale_matrix():
     # 0,0 goes from being the middle of the field to the
     # top left and we scale for screen resolution at the same time
     if glb_field_panel is not None:
         ximg, yimg = glb_field_panel.field_bmp.GetSize()
-        print('current ximg, yimg')
-        print(ximg, yimg)
-    else:
+    else:  # Really not sure how to handle this yet.
         ximg = 1280
         yimg = 600
 
     # Used to convert inches to pixels
-    xscale = ximg / (54*12)
-    yscale = yimg / (27*12)
-
+    xscale = ximg / FIELD_X_INCHES
+    yscale = yimg / FIELD_Y_INCHES
     M = [
         [xscale, 0],
         [0, yscale]
     ]
-    # Move origin from center of 54x27' field to top left but in inches
+    return np.array(M)
+
+
+def get_transform_center_basis_to_screen():
     v = [(54/2*12), (27/2*12)]
-    return M, v
-
-
-def get_transform_center_basis_to_blue_bottom():
-    # 0,0 goes from being the middle of the field to the bottom left
-    M = [
-        [1, 0],
-        [0, 1]
-    ]
-    # Move origin from center of 54x27' field to top left but in inches
-    v = [-(54/2*12), -(27/2*12)]
-    return M, v
-
-
-def get_transform_center_basis_to_blue_top():
-    # 0,0 goes from being the middle of the field to the top left
-    M = [
-        [1, 0],
-        [0, 1]
-    ]
-    # Move origin from center of 54x27' field to top left but in inches
-    v = [-(54/2*12), (27/2*12)]
-    return M, v
-
-
-def get_transform_center_basis_to_red_bottom():
-    # 0,0 goes from being the middle of the field to the bottom right
-    M = [
-        [1, 0],
-        [0, 1]
-    ]
-    # Move origin from center of 54x27' field to bottom right but in inches
-    v = [(54/2*12), -(27/2*12)]
-    return M, v
-
-
-def get_transform_center_basis_to_red_top():
-    # 0,0 goes from being the middle of the field to the top right
-    M = [
-        [1, 0],
-        [0, 1]
-    ]
-    # Move origin from center of 54x27' field to top right but in inches
-    v = [(54/2*12), (27/2*12)]
-    return M, v
+    return get_scale_matrix(), np.array(v)
 
 
 # Define a type that can hold a waypoint's data.
@@ -475,8 +443,8 @@ class FieldPanel(wx.Panel):
     # Event fires any time the mouse moves on the field drawing
     @modifies_state
     def on_mouse_move(self, event):
-        fieldx, fieldy = event.GetPosition()
-        # fieldx, fieldy = self._screen_to_field(x, y)
+        x, y = event.GetPosition()
+        fieldx, fieldy = self._screen_to_field(x, y)
         # print(f'x: {x}, y: {y} fieldx: {fieldx}, fieldy: {fieldy}')
 
         # If we're not dragging an object/waypoint then we're just going to
@@ -521,6 +489,27 @@ class FieldPanel(wx.Panel):
         x, y = evt.GetPosition()
         x, y = self._screen_to_field(x, y)
         self.del_node(x, y)
+
+    def _screen_vector_to_field(self, screen_points=[[0, 0]]):
+        M, v = get_transform_center_basis_to_screen()
+        Minv = np.linalg.inv(M)
+        if type(screen_points) is not np.ndarray:
+            field_points = np.array(screen_points)
+        else:
+            field_points = screen_points
+        field_points = field_points.dot(Minv)
+        field_points = field_points - v
+        return field_points
+
+    def _screen_to_field(self, x, y):
+        M, v = get_transform_center_basis_to_screen()
+        Minv = np.linalg.inv(M)
+        field_points = np.array([[x, y]])
+        field_points = field_points.dot(Minv)
+        field_points = field_points - v
+        fieldx = qtr_round(field_points[0][0])
+        fieldy = qtr_round(field_points[0][1])
+        return fieldx, fieldy
 
     # Clicking on the field can either select or add a node depending
     # on where it happens.
@@ -635,15 +624,12 @@ class FieldPanel(wx.Panel):
         ])
         field_points += np.array(v)
         screen_points = np.array(field_points).dot(M)
-        print(screen_points)
         sx, sy = screen_points[0]
         ex, ey = screen_points[1]
-        print(sx, sy, ex, ey)
         dc.DrawLine(sx, sy, ex, ey)
         sx, sy = screen_points[2]
         ex, ey = screen_points[3]
         dc.DrawLine(sx, sy, ex, ey)
-        print(sx, sy, ex, ey)
 
     def _get_screen_waypoints(self):
         return [
@@ -683,20 +669,16 @@ class FieldPanel(wx.Panel):
         # if self.draw_field_center:
         self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
-        if False:
+        if True:
             cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
             M, v = get_transform_center_basis_to_screen()
             field_points = np.array([(w.x, w.y) for w in _current_waypoints()])
-            print(field_points)
             screen_points = field_points + v
-            print(screen_points)
             screen_points = screen_points.dot(M)
-            print(screen_points)
-            for idx, sp in enumerate(
-                screen_points
+            for idx, (sp, w) in enumerate(
+                zip(screen_points, _current_waypoints())
             ):
                 screenx, screeny = sp
-                w = None  # TODO: Placeholder
                 self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
                 for name, t in _app_state[TFMS].items():
                     continue
@@ -908,8 +890,11 @@ class RoutinePanel(wx.Panel):
         _app_state[CURRENT_ROUTINE] = routine
         print(f'Selected routine {routine}')
         global glb_field_panel, glb_waypoint_panel
-        glb_field_panel.redraw()
-        glb_waypoint_panel.update_waypoint_grid()
+        if glb_field_panel is not None:
+            glb_field_panel.redraw()
+        if glb_waypoint_panel is not None:
+            glb_waypoint_panel.update_waypoint_grid()
+        pass
 
     def on_routine_name_change_begin(self, evt):
         print('begin name change')
