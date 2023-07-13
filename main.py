@@ -19,6 +19,74 @@ from wx.lib.splitter import MultiSplitterWindow
 # Using flake8 for linting
 
 
+def get_transform_center_basis_to_screen():
+    # 0,0 goes from being the middle of the field to the
+    # top left and we scale for screen resolution at the same time
+    if glb_field_panel is not None:
+        ximg, yimg = glb_field_panel.field_bmp.GetSize()
+        print('current ximg, yimg')
+        print(ximg, yimg)
+    else:
+        ximg = 1280
+        yimg = 600
+
+    # Used to convert inches to pixels
+    xscale = ximg / (54*12)
+    yscale = yimg / (27*12)
+
+    M = [
+        [xscale, 0],
+        [0, yscale]
+    ]
+    # Move origin from center of 54x27' field to top left but in inches
+    v = [(54/2*12), (27/2*12)]
+    return M, v
+
+
+def get_transform_center_basis_to_blue_bottom():
+    # 0,0 goes from being the middle of the field to the bottom left
+    M = [
+        [1, 0],
+        [0, 1]
+    ]
+    # Move origin from center of 54x27' field to top left but in inches
+    v = [-(54/2*12), -(27/2*12)]
+    return M, v
+
+
+def get_transform_center_basis_to_blue_top():
+    # 0,0 goes from being the middle of the field to the top left
+    M = [
+        [1, 0],
+        [0, 1]
+    ]
+    # Move origin from center of 54x27' field to top left but in inches
+    v = [-(54/2*12), (27/2*12)]
+    return M, v
+
+
+def get_transform_center_basis_to_red_bottom():
+    # 0,0 goes from being the middle of the field to the bottom right
+    M = [
+        [1, 0],
+        [0, 1]
+    ]
+    # Move origin from center of 54x27' field to bottom right but in inches
+    v = [(54/2*12), -(27/2*12)]
+    return M, v
+
+
+def get_transform_center_basis_to_red_top():
+    # 0,0 goes from being the middle of the field to the top right
+    M = [
+        [1, 0],
+        [0, 1]
+    ]
+    # Move origin from center of 54x27' field to top right but in inches
+    v = [(54/2*12), (27/2*12)]
+    return M, v
+
+
 # Define a type that can hold a waypoint's data.
 class Waypoint():
     x: float = 0.0
@@ -331,6 +399,8 @@ class FieldPanel(wx.Panel):
         imgpath = resource_path(imgname)
         field = wx.Image(imgpath,
                          wx.BITMAP_TYPE_ANY).ConvertToBitmap()
+        self.field_orig_x = field.GetWidth()
+        self.field_orig_y = field.GetHeight()
         self.w = field.GetWidth()
         self.h = field.GetHeight()
         self.field_bmp = wx.StaticBitmap(parent=self,
@@ -405,9 +475,9 @@ class FieldPanel(wx.Panel):
     # Event fires any time the mouse moves on the field drawing
     @modifies_state
     def on_mouse_move(self, event):
-        x, y = event.GetPosition()
-        fieldx, fieldy = self._screen_to_field(x, y)
-        print(f'x: {x}, y: {y} fieldx: {fieldx}, fieldy: {fieldy}')
+        fieldx, fieldy = event.GetPosition()
+        # fieldx, fieldy = self._screen_to_field(x, y)
+        # print(f'x: {x}, y: {y} fieldx: {fieldx}, fieldy: {fieldy}')
 
         # If we're not dragging an object/waypoint then we're just going to
         # see if the mouse is near a node. If so, we'll highlight it to
@@ -434,38 +504,8 @@ class FieldPanel(wx.Panel):
             idx = waypoints.index(self._selected_node)
             waypoints[idx].x = fieldx
             waypoints[idx].y = fieldy
-            print(idx, fieldx, fieldy)
             glb_waypoint_panel.update_waypoint_data()
             self.redraw()
-
-    def _screen_to_field(self, x, y):
-        # TODO: Make this linear algebra
-        # 640 is center for x
-        # 300 is center for y
-        size = glb_field_panel.field_bmp.GetSize()
-        xoff = (size[0] - 10) / 2
-        yoff = (size[1] - 20) / 2
-        print(xoff, yoff)
-        x -= xoff
-        y -= yoff
-        x /= 2
-        y /= 2
-        return x, y
-
-    def _field_to_screen(self, x, y):
-        # TODO: Make this linear algebra
-        if self.field_bmp is not None:
-            size = self.field_bmp.GetSize()
-            xoff = (size[0] - 10) / 2
-            yoff = (size[1] - 20) / 2
-        else:
-            xoff = 640
-            yoff = 300
-        x *= 2
-        y *= 2
-        x += xoff
-        y += yoff
-        return int(x), int(y)
 
     @modifies_state
     def on_field_offset_change(self, evt):
@@ -510,14 +550,13 @@ class FieldPanel(wx.Panel):
 
     # Draw an original waypoint in the proper color. These are (currently)
     # the only editable ones.
-    def _draw_orig_waypoint(self, dc, w, idx):
-        x, y = self._field_to_screen(w.x, w.y)
+    def _draw_orig_waypoint(self, dc, w, screenx, screeny, idx):
         bgcolor = 'black'
         if self._highlight_node == w:
             bgcolor = 'white'
         if self._selected_node == w:
             bgcolor = 'orange'
-        self._draw_waypoint(dc, x, y, idx, 'red', bgcolor)
+        self._draw_waypoint(dc, screenx, screeny, idx, 'red', bgcolor)
 
     # Draw the entire path between all of our waypoints and all of the
     # transformations we've defined and asked to be visible.
@@ -585,18 +624,26 @@ class FieldPanel(wx.Panel):
     # for all mirror and rotation operations.
     def _draw_field_center(self, dc, cross_size=5):
         dc.SetPen(wx.Pen('magenta', _app_state[CROSSHAIR_THICKNESS]))
-
-        sx, sy = self._field_to_screen(_app_state[FIELD_X_OFFSET]-cross_size,
-                                       _app_state[FIELD_Y_OFFSET])
-
-        ex, ey = self._field_to_screen(_app_state[FIELD_X_OFFSET]+cross_size,
-                                       _app_state[FIELD_Y_OFFSET])
+        xoff = _app_state[FIELD_X_OFFSET]
+        yoff = _app_state[FIELD_Y_OFFSET]
+        M, v = get_transform_center_basis_to_screen()
+        field_points = np.array([
+            [xoff-cross_size, yoff],
+            [xoff+cross_size, yoff],
+            [xoff, yoff-cross_size],
+            [xoff, yoff+cross_size],
+        ])
+        field_points += np.array(v)
+        screen_points = np.array(field_points).dot(M)
+        print(screen_points)
+        sx, sy = screen_points[0]
+        ex, ey = screen_points[1]
+        print(sx, sy, ex, ey)
         dc.DrawLine(sx, sy, ex, ey)
-        sx, sy = self._field_to_screen(_app_state[FIELD_X_OFFSET],
-                                       _app_state[FIELD_Y_OFFSET]-cross_size)
-        ex, ey = self._field_to_screen(_app_state[FIELD_X_OFFSET],
-                                       _app_state[FIELD_Y_OFFSET]+cross_size)
+        sx, sy = screen_points[2]
+        ex, ey = screen_points[3]
         dc.DrawLine(sx, sy, ex, ey)
+        print(sx, sy, ex, ey)
 
     def _get_screen_waypoints(self):
         return [
@@ -633,43 +680,57 @@ class FieldPanel(wx.Panel):
             field_blank = field_blank.Scale(imgx, imgy)
         field_blank = field_blank.ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
-        if self.draw_field_center:
-            self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
+        # if self.draw_field_center:
+        self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
-        cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
-        for idx, w in enumerate(_current_waypoints()):
-            self._draw_orig_waypoint(dc, w, idx)
-            for name, t in _app_state[TFMS].items():
-                if name not in cr.active_transformations:
+        if False:
+            cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
+            M, v = get_transform_center_basis_to_screen()
+            field_points = np.array([(w.x, w.y) for w in _current_waypoints()])
+            print(field_points)
+            screen_points = field_points + v
+            print(screen_points)
+            screen_points = screen_points.dot(M)
+            print(screen_points)
+            for idx, sp in enumerate(
+                screen_points
+            ):
+                screenx, screeny = sp
+                w = None  # TODO: Placeholder
+                self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
+                for name, t in _app_state[TFMS].items():
                     continue
-                mtx = np.identity(2)
-                trans_vec = np.array([0, 0])
-                for s in t.steps:
-                    if s.matrix is not None:
-                        mtx = np.dot(np.array(s.matrix), mtx)
-                    if s.vector is not None:
-                        trans_vec += np.array(s.vector)
-                # Create a vector of field waypoints
-                vec = np.array([w.x, w.y])
-                # Subtract the field offset to translate it to the new origin
-                vec -= np.array([_app_state[FIELD_X_OFFSET],
-                                 _app_state[FIELD_Y_OFFSET]])
-                # Apply any matrix transformation to it or just use the
-                # identity matrix in mtx from above.
-                vec = np.dot(mtx, vec)
-                # Add the field offset back in
-                vec += np.array([_app_state[FIELD_X_OFFSET],
-                                 _app_state[FIELD_Y_OFFSET]])
-                # Now make any final translation to the vector. If none is
-                # defined we'll juse add the zero vector to it that we defined
-                # in trans_vec above.
-                vec += trans_vec
-                x, y = self._field_to_screen(vec[0], vec[1])
-                self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
+                    if name not in cr.active_transformations:
+                        continue
+                    mtx = np.identity(2)
+                    trans_vec = np.array([0, 0])
+                    for s in t.steps:
+                        if s.matrix is not None:
+                            mtx = np.dot(np.array(s.matrix), mtx)
+                        if s.vector is not None:
+                            trans_vec += np.array(s.vector)
+                    # Create a vector of field waypoints
+                    vec = np.array([screenx, screeny])
+                    # Subtract the field offset to translate it to the new origin
+                    vec -= np.array([_app_state[FIELD_X_OFFSET],
+                                    _app_state[FIELD_Y_OFFSET]])
+                    # Apply any matrix transformation to it or just use the
+                    # identity matrix in mtx from above.
+                    vec = np.dot(mtx, vec)
+                    # Add the field offset back in
+                    vec += np.array([_app_state[FIELD_X_OFFSET],
+                                    _app_state[FIELD_Y_OFFSET]])
+                    # Now make any final translation to the vector. If none is
+                    # defined we'll juse add the zero vector to it that we defined
+                    # in trans_vec above.
+                    vec += trans_vec
+                    x, y = self._field_to_screen(vec[0], vec[1])
+                    self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
 
-        # We can't draw the path until we have at least three waypoints
-        if len(_current_waypoints()) > 2:
-            self._draw_path(dc)
+            # We can't draw the path until we have at least three waypoints
+            if len(_current_waypoints()) > 2:
+                # self._draw_path(dc)
+                pass
 
         # Blast the map back onto the screen with everything drawn
         del dc
@@ -846,6 +907,7 @@ class RoutinePanel(wx.Panel):
         routine = evt.GetLabel()
         _app_state[CURRENT_ROUTINE] = routine
         print(f'Selected routine {routine}')
+        global glb_field_panel, glb_waypoint_panel
         glb_field_panel.redraw()
         glb_waypoint_panel.update_waypoint_grid()
 
@@ -1007,7 +1069,6 @@ class TransformationPanel(wx.Panel):
             row = wx.BoxSizer(wx.HORIZONTAL)
             lbl = wx.StaticText(self, label=n)
             view_state = 'Active' if n in active_trans else 'Inactive'
-            print(n, view_state)
             toggle_view = wx.Button(self, wx.ID_ANY, label=view_state, name=n)
             delete = wx.Button(self, wx.ID_ANY, label='Delete', name=n)
             edit_transform = wx.Button(self, wx.ID_ANY, label='...', name=n)
@@ -1026,10 +1087,8 @@ class TransformationPanel(wx.Panel):
             row.Add(edit_transform, wx.EXPAND, border=3)
 
             self.main_sizer.Add(row, 0, wx.SHRINK | wx.ALL, border=5)
-        # self.SetBackgroundColour('blue')
         self.SetSizerAndFit(self.main_sizer)
         self.Layout()
-        print('ok so far')
 
 
 # A wx Panel that holds the controls on the right side, or 'control' panel
