@@ -589,14 +589,16 @@ class FieldPanel(wx.Panel):
             print('-----')
             """
             # Find control points for Bezier curves
-            A, B = get_bezier_coef(points)
-
-            firstx, firsty = self._field_to_screen(points[0, 0], points[0, 1])
+            M, v = get_transform_center_basis_to_screen()
+            screen_points = points + v
+            screen_points = screen_points.dot(M)
+            A, B = get_bezier_coef(screen_points)
+            firstx, firsty = screen_points[0][0], screen_points[0][1]
             path.MoveToPoint(firstx, firsty)
-            for end, ctl1P, ctl2P in zip(points[1:], A, B):
-                x1, y1 = self._field_to_screen(ctl1P[0], ctl1P[1])
-                x2, y2 = self._field_to_screen(ctl2P[0], ctl2P[1])
-                endx, endy = self._field_to_screen(end[0], end[1])
+            for end, ctl1P, ctl2P in zip(screen_points[1:], A, B):
+                x1, y1 = ctl1P[0], ctl1P[1]
+                x2, y2 = ctl2P[0], ctl2P[1]
+                endx, endy = end[0], end[1]
                 ctl1 = wx.Point2D(x1, y1)
                 ctl2 = wx.Point2D(x2, y2)
                 endP = wx.Point2D(endx, endy)
@@ -711,7 +713,7 @@ class FieldPanel(wx.Panel):
 
             # We can't draw the path until we have at least three waypoints
             if len(_current_waypoints()) > 2:
-                # self._draw_path(dc)
+                self._draw_path(dc)
                 pass
 
         # Blast the map back onto the screen with everything drawn
