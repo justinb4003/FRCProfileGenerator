@@ -511,6 +511,15 @@ class FieldPanel(wx.Panel):
         fieldy = qtr_round(field_points[0][1])
         return fieldx, fieldy
 
+    def _field_to_screen(self, x, y):
+        M, v = get_transform_center_basis_to_screen()
+        field_points = np.array([[x, y]])
+        field_points = field_points + v
+        field_points = field_points.dot(M)
+        fieldx = qtr_round(field_points[0][0])
+        fieldy = qtr_round(field_points[0][1])
+        return fieldx, fieldy
+
     # Clicking on the field can either select or add a node depending
     # on where it happens.
     def on_field_click(self, evt):
@@ -633,12 +642,6 @@ class FieldPanel(wx.Panel):
         ex, ey = screen_points[3]
         dc.DrawLine(sx, sy, ex, ey)
 
-    def _get_screen_waypoints(self):
-        return [
-            Waypoint(self._field_to_screen(x, y), 10, 0)
-            for x, y in _current_waypoints()
-        ]
-
     # When a click on the field occurs we locate the waypoint closest to that
     # click so we know which one the users wishes to operate on.
     # The distance_limit threshold sets a max distance the user can be away
@@ -668,48 +671,48 @@ class FieldPanel(wx.Panel):
             field_blank = field_blank.Scale(imgx, imgy)
         field_blank = field_blank.ConvertToBitmap()
         dc = wx.MemoryDC(field_blank)
-        # if self.draw_field_center:
-        self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
+        if self.draw_field_center:
+            self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
-        if True:
-            cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
-            M, v = get_transform_center_basis_to_screen()
-            field_points = np.array([(w.x, w.y) for w in _current_waypoints()])
-            screen_points = field_points + v
-            screen_points = screen_points.dot(M)
-            for idx, (sp, w) in enumerate(
-                zip(screen_points, _current_waypoints())
-            ):
-                screenx, screeny = sp
-                self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
-                for name, t in _app_state[TFMS].items():
+        cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
+        M, v = get_transform_center_basis_to_screen()
+        # Move transform iteration to out here ish
+        field_points = np.array([(w.x, w.y) for w in _current_waypoints()])
+        screen_points = field_points + v
+        screen_points = screen_points.dot(M)
+        for idx, (sp, w) in enumerate(
+            zip(screen_points, _current_waypoints())
+        ):
+            screenx, screeny = sp
+            self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
+            for name, t in _app_state[TFMS].items():
+                if name not in cr.active_transformations:
+                    print(f'skipping {name} waypoints')
                     continue
-                    if name not in cr.active_transformations:
-                        continue
-                    mtx = np.identity(2)
-                    trans_vec = np.array([0, 0])
-                    for s in t.steps:
-                        if s.matrix is not None:
-                            mtx = np.dot(np.array(s.matrix), mtx)
-                        if s.vector is not None:
-                            trans_vec += np.array(s.vector)
-                    # Create a vector of field waypoints
-                    vec = np.array([screenx, screeny])
-                    # Subtract the field offset to translate it to the new origin
-                    vec -= np.array([_app_state[FIELD_X_OFFSET],
-                                    _app_state[FIELD_Y_OFFSET]])
-                    # Apply any matrix transformation to it or just use the
-                    # identity matrix in mtx from above.
-                    vec = np.dot(mtx, vec)
-                    # Add the field offset back in
-                    vec += np.array([_app_state[FIELD_X_OFFSET],
-                                    _app_state[FIELD_Y_OFFSET]])
-                    # Now make any final translation to the vector. If none is
-                    # defined we'll juse add the zero vector to it that we defined
-                    # in trans_vec above.
-                    vec += trans_vec
-                    x, y = self._field_to_screen(vec[0], vec[1])
-                    self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
+                mtx = np.identity(2)
+                trans_vec = np.array([0, 0])
+                for s in t.steps:
+                    if s.matrix is not None:
+                        mtx = np.dot(np.array(s.matrix), mtx)
+                    if s.vector is not None:
+                        trans_vec += np.array(s.vector)
+                # Create a vector of field waypoints
+                vec = np.array([screenx, screeny])
+                # Subtract the field offset to translate it to the new origin
+                vec -= np.array([_app_state[FIELD_X_OFFSET],
+                                _app_state[FIELD_Y_OFFSET]])
+                # Apply any matrix transformation to it or just use the
+                # identity matrix in mtx from above.
+                vec = np.dot(mtx, vec)
+                # Add the field offset back in
+                vec += np.array([_app_state[FIELD_X_OFFSET],
+                                _app_state[FIELD_Y_OFFSET]])
+                # Now make any final translation to the vector. If none is
+                # defined we'll juse add the zero vector to it that we defined
+                # in trans_vec above.
+                vec += trans_vec
+                x, y = self._field_to_screen(vec[0], vec[1])
+                self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
 
             # We can't draw the path until we have at least three waypoints
             if len(_current_waypoints()) > 2:
