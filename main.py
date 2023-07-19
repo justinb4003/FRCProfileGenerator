@@ -632,9 +632,10 @@ class FieldPanel(wx.Panel):
             [xoff+cross_size, yoff],
             [xoff, yoff-cross_size],
             [xoff, yoff+cross_size],
-        ])
+        ]).astype(float)
         field_points += np.array(v)
-        screen_points = np.array(field_points).dot(M).astype(int)
+        screen_points = np.array(field_points).dot(M)
+        screen_points = screen_points.astype(int)
         sx, sy = screen_points[0]
         ex, ey = screen_points[1]
         dc.DrawLine(sx, sy, ex, ey)
@@ -670,7 +671,8 @@ class FieldPanel(wx.Panel):
             imgx, imgy = self.field_bmp.GetSize()
             field_blank = field_blank.Scale(imgx, imgy)
         field_blank = field_blank.ConvertToBitmap()
-        dc = wx.MemoryDC(field_blank)
+        dc = wx.BufferedPaintDC()
+        dc.SetBackgroundBitmap(field_blank)
         if self.draw_field_center:
             self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
@@ -678,43 +680,44 @@ class FieldPanel(wx.Panel):
         M, v = get_transform_center_basis_to_screen()
         # Move transform iteration to out here ish
         field_points = np.array([(w.x, w.y) for w in _current_waypoints()])
-        screen_points = field_points + v
-        screen_points = screen_points.dot(M)
-        for idx, (sp, w) in enumerate(
-            zip(screen_points, _current_waypoints())
-        ):
-            screenx, screeny = sp
-            screenx = int(screenx)
-            screeny = int(screeny)
-            self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
-            for name, t in _app_state[TFMS].items():
-                if name not in cr.active_transformations:
-                    print(f'skipping {name} waypoints')
-                    continue
-                mtx = np.identity(2)
-                trans_vec = np.array([0, 0])
-                for s in t.steps:
-                    if s.matrix is not None:
-                        mtx = np.dot(np.array(s.matrix), mtx)
-                    if s.vector is not None:
-                        trans_vec += np.array(s.vector)
-                # Create a vector of field waypoints
-                vec = np.array([screenx, screeny]).astype(float)
-                # Subtract the field offset to translate it to the new origin
-                vec -= np.array([_app_state[FIELD_X_OFFSET],
-                                _app_state[FIELD_Y_OFFSET]])
-                # Apply any matrix transformation to it or just use the
-                # identity matrix in mtx from above.
-                vec = np.dot(mtx, vec)
-                # Add the field offset back in
-                vec += np.array([_app_state[FIELD_X_OFFSET],
-                                _app_state[FIELD_Y_OFFSET]])
-                # Now make any final translation to the vector. If none is
-                # defined we'll juse add the zero vector to it that we defined
-                # in trans_vec above.
-                vec += trans_vec
-                x, y = self._field_to_screen(vec[0], vec[1])
-                self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
+        if len(field_points) > 0:
+            screen_points = field_points + v
+            screen_points = screen_points.dot(M)
+            for idx, (sp, w) in enumerate(
+                zip(screen_points, _current_waypoints())
+            ):
+                screenx, screeny = sp
+                screenx = int(screenx)
+                screeny = int(screeny)
+                self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
+                for name, t in _app_state[TFMS].items():
+                    if name not in cr.active_transformations:
+                        print(f'skipping {name} waypoints')
+                        continue
+                    mtx = np.identity(2)
+                    trans_vec = np.array([0, 0])
+                    for s in t.steps:
+                        if s.matrix is not None:
+                            mtx = np.dot(np.array(s.matrix), mtx)
+                        if s.vector is not None:
+                            trans_vec += np.array(s.vector)
+                    # Create a vector of field waypoints
+                    vec = np.array([screenx, screeny]).astype(float)
+                    # Subtract the field offset to translate it to the new origin
+                    vec -= np.array([_app_state[FIELD_X_OFFSET],
+                                    _app_state[FIELD_Y_OFFSET]])
+                    # Apply any matrix transformation to it or just use the
+                    # identity matrix in mtx from above.
+                    vec = np.dot(mtx, vec)
+                    # Add the field offset back in
+                    vec += np.array([_app_state[FIELD_X_OFFSET],
+                                    _app_state[FIELD_Y_OFFSET]])
+                    # Now make any final translation to the vector. If none is
+                    # defined we'll juse add the zero vector to it that we defined
+                    # in trans_vec above.
+                    vec += trans_vec
+                    x, y = self._field_to_screen(vec[0], vec[1])
+                    self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
 
             # We can't draw the path until we have at least three waypoints
             if len(_current_waypoints()) > 2:
@@ -857,7 +860,7 @@ class RoutinePanel(wx.Panel):
 
         idx = 0
         for c in choices:
-            self.routine_list.InsertItem(sys.maxsize, c)
+            self.routine_list.InsertItem(idx, c)
             if c == _app_state[CURRENT_ROUTINE]:
                 self.routine_list.SetItemState(idx,
                                                wx.LIST_STATE_SELECTED,
@@ -1263,7 +1266,8 @@ class MainWindow(wx.Frame):
                           'Profile Generation',
                           size=(1660, 800))
 
-        self.SetIcon(wx.Icon('assets/web/favicon.ico', wx.BITMAP_TYPE_ICO))
+        iconfile = os.path.join('assets', 'web', 'favicon.ico')
+        self.SetIcon(wx.Icon(iconfile, wx.BITMAP_TYPE_ICO))
         self.splitter = MultiSplitterWindow(self, style=wx.SP_LIVE_UPDATE)
         glb_control_panel = ControlPanel(self.splitter)
         glb_field_panel = FieldPanel(self.splitter)
