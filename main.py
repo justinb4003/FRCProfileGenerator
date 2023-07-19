@@ -516,9 +516,9 @@ class FieldPanel(wx.Panel):
         field_points = np.array([[x, y]])
         field_points = field_points + v
         field_points = field_points.dot(M)
-        fieldx = qtr_round(field_points[0][0])
-        fieldy = qtr_round(field_points[0][1])
-        return fieldx, fieldy
+        screenx = int(field_points[0][0])
+        screeny = int(field_points[0][1])
+        return screenx, screeny
 
     # Clicking on the field can either select or add a node depending
     # on where it happens.
@@ -634,7 +634,7 @@ class FieldPanel(wx.Panel):
             [xoff, yoff+cross_size],
         ])
         field_points += np.array(v)
-        screen_points = np.array(field_points).dot(M)
+        screen_points = np.array(field_points).dot(M).astype(int)
         sx, sy = screen_points[0]
         ex, ey = screen_points[1]
         dc.DrawLine(sx, sy, ex, ey)
@@ -684,6 +684,8 @@ class FieldPanel(wx.Panel):
             zip(screen_points, _current_waypoints())
         ):
             screenx, screeny = sp
+            screenx = int(screenx)
+            screeny = int(screeny)
             self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
             for name, t in _app_state[TFMS].items():
                 if name not in cr.active_transformations:
@@ -697,7 +699,7 @@ class FieldPanel(wx.Panel):
                     if s.vector is not None:
                         trans_vec += np.array(s.vector)
                 # Create a vector of field waypoints
-                vec = np.array([screenx, screeny])
+                vec = np.array([screenx, screeny]).astype(float)
                 # Subtract the field offset to translate it to the new origin
                 vec -= np.array([_app_state[FIELD_X_OFFSET],
                                 _app_state[FIELD_Y_OFFSET]])
