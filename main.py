@@ -32,10 +32,11 @@ FIELD_Y_INCHES = 27*12
 
 
 def get_scale_matrix():
+    global glb_field_render
     # 0,0 goes from being the middle of the field to the
     # top left and we scale for screen resolution at the same time
-    if glb_field_panel is not None:
-        ximg, yimg = glb_field_panel.field_bmp.GetSize()
+    if glb_field_render is not None:
+        ximg, yimg = glb_field_render.field_bmp.GetSize()
     else:  # Really not sure how to handle this yet.
         ximg = 1280
         yimg = 600
@@ -346,193 +347,101 @@ def rotation_matrix(deg=None, rad=None):
     return np.array([[cos(theta), -sin(theta)], [sin(theta), cos(theta)]])
 
 
-# A wx Panel that holds the Field drawing portion of the UI
-class FieldPanel(wx.Panel):
+class FieldRenderPanel(wx.Panel):
     # Node that we've actually clicked on
     _selected_node = None
     # Node that we're near enough to to highlight
     _highlight_node = None
-
-    control_panel = None
+    redraw_needed = True
 
     def __init__(self, parent):
-        self.show_control_points = False
-        self.draw_field_center = True
-        # We need to hang onto a reference to the control panel's elemnts
-        # because the app needs to send data over to them now and again
-        # likewise the control panel object has a reference to this field panel
         wx.Panel.__init__(self, parent=parent)
-        # Load in the field image
+        self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
+        self.Bind(wx.EVT_IDLE, self.on_idle)
+        self.Bind(wx.EVT_PAINT, self.on_paint)
         imgname = _app_state[FIELD_BACKGROUND_IMAGE]
         imgpath = resource_path(imgname)
-        field = wx.Image(imgpath,
-                         wx.BITMAP_TYPE_ANY).ConvertToBitmap()
-        self.field_orig_x = field.GetWidth()
-        self.field_orig_y = field.GetHeight()
-        self.w = field.GetWidth()
-        self.h = field.GetHeight()
-        self.field_bmp = wx.StaticBitmap(parent=self,
-                                         id=-1,
-                                         bitmap=field,
-                                         pos=(0, 0),
-                                         size=(self.w, self.h))
-        # Here any click that happens inside the field area will trigger the
-        # on_field_click function which handles the event.
+        self.field_image = wx.Image(imgpath, wx.BITMAP_TYPE_ANY)
+        self.field_orig_x = self.field_image.GetWidth()
+        self.field_orig_y = self.field_image.GetHeight()
+        self.field_buffer = wx.EmptyBitmap(self.field_orig_x,
+                                           self.field_orig_y)
+        self.field_bmp = wx.StaticBitmap(self, -1, self.field_buffer)
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
         self.field_bmp.Bind(wx.EVT_RIGHT_DOWN, self.on_field_click_right)
         self.field_bmp.Bind(wx.EVT_MOTION, self.on_mouse_move)
 
-        # Establish controls for modifying the field properties
-        # Much like the buttons we create labels and text editing boxes
-        field_offset_x_lbl = wx.StaticText(self, label='Field Offset X')
-        self.field_offset_x_txt = wx.TextCtrl(self)
-        self.field_offset_x_txt.ChangeValue(str(_app_state[FIELD_X_OFFSET]))
-        field_offset_y_lbl = wx.StaticText(self, label='Field Offset Y')
-        self.field_offset_y_txt = wx.TextCtrl(self)
-        self.field_offset_y_txt.ChangeValue(str(_app_state[FIELD_Y_OFFSET]))
-
-        draw_field_center_btn = wx.CheckBox(self,
-                                            label='Draw Field Center')
-        show_control_points_btn = wx.CheckBox(self,
-                                              label='Show Control Points')
-        show_control_points_btn.SetValue(self.show_control_points)
-        draw_field_center_btn.SetValue(self.draw_field_center)
-
-        self.field_offset_x_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
-        self.field_offset_y_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
-        draw_field_center_btn.Bind(wx.EVT_CHECKBOX,
-                                   self.toggle_draw_field_center)
-        show_control_points_btn.Bind(wx.EVT_CHECKBOX,
-                                     self.toggle_control_points)
-
-        # The BoxSizer is a layout manager that arranges the controls in a box
-        vbox = wx.BoxSizer(wx.VERTICAL)
-        vbox.Add(self.field_bmp, 0, wx.EXPAND | wx.ALL)
-        border = 5
-
-        hbox = wx.BoxSizer(wx.HORIZONTAL)
-        xbox = wx.BoxSizer(wx.VERTICAL)
-        xbox.Add(field_offset_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
-        xbox.Add(self.field_offset_x_txt, 0, wx.EXPAND | wx.ALL, border=border)
-
-        ybox = wx.BoxSizer(wx.VERTICAL)
-        ybox.Add(field_offset_y_lbl, 0, wx.EXPAND | wx.ALL, border=border)
-        ybox.Add(self.field_offset_y_txt, 0, wx.EXPAND | wx.ALL, border=border)
-
-        zbox = wx.BoxSizer(wx.VERTICAL)
-        zbox.Add(draw_field_center_btn, 0, wx.EXPAND | wx.ALL, border=border)
-        zbox.Add(show_control_points_btn, 0, wx.EXPAND | wx.ALL, border=border)
-
-        hbox.Add(xbox)
-        hbox.Add(ybox)
-        hbox.Add(zbox)
-        vbox.Add(hbox)
-
-        self.SetSizer(vbox)
-        self.Fit()
-        self.redraw()
-
-    def toggle_control_points(self, evt):
-        self.show_control_points = not self.show_control_points
-        self.redraw()
-
-    def toggle_draw_field_center(self, evt):
-        self.draw_field_center = not self.draw_field_center
-        self.redraw()
-
-    # Event fires any time the mouse moves on the field drawing
-    @modifies_state
-    def on_mouse_move(self, event):
-        x, y = event.GetPosition()
-        fieldx, fieldy = self._screen_to_field(x, y)
-        # print(f'x: {x}, y: {y} fieldx: {fieldx}, fieldy: {fieldy}')
-
-        # If we're not dragging an object/waypoint then we're just going to
-        # see if the mouse is near a node. If so, we'll highlight it to
-        # indicate that if the user left clicks it will be selected.
-        if not event.Dragging():
-            event.Skip()
-            last_highlight = self._highlight_node
-            self._highlight_node = self._find_closest_waypoint(fieldx, fieldy)
-            # We only wan to redraw the grid if we actually changed the
-            # highlight node
-            if last_highlight != self._highlight_node:
-                self.redraw()
-            return
-        event.Skip()
-        # print("Dragging position", x, y)
-        # If we're in a drag motion and have a seleted node we need to
-        # update its coordinates to the mouse position and redraw everything.
-        if self._selected_node is not None:
-            self._selected_node.x = fieldx
-            self._selected_node.y = fieldy
-            waypoints = (
-                _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints
-            )
-            idx = waypoints.index(self._selected_node)
-            waypoints[idx].x = fieldx
-            waypoints[idx].y = fieldy
-            glb_waypoint_panel.update_waypoint_data()
+    def on_idle(self, evt):
+        if self.redraw_needed:
             self.redraw()
 
-    @modifies_state
-    def on_field_offset_change(self, evt):
-        print('offset change')
-        global _app_state
-        _app_state[FIELD_X_OFFSET] = float(self.field_offset_x_txt.GetValue())
-        _app_state[FIELD_Y_OFFSET] = float(self.field_offset_y_txt.GetValue())
-        self.redraw()
-        return
+    def on_paint(self, evt):
+        # Create a buffered paint DC.  It will create the real
+        # wx.PaintDC and then blit the bitmap to it when dc is
+        # deleted.  Since we don't need to draw anything else
+        # here that's all there is to it.
+        dc = wx.BufferedPaintDC(self, self.field_buffer)
+        del dc
 
-    # We use the right click to delete a node that's close to the click
-    def on_field_click_right(self, evt):
-        x, y = evt.GetPosition()
-        x, y = self._screen_to_field(x, y)
-        self.del_node(x, y)
+    # Draw all waypoints and paths on the field
+    def redraw(self):
+        dc = wx.BufferedDC(None, self.field_buffer)
+        field_blank = self.field_image
+        if self.field_bmp is not None:
+            imgx, imgy = self.field_bmp.GetSize()
+            field_blank = field_blank.Scale(imgx, imgy)
+        field_blank = field_blank.ConvertToBitmap()
+        if glb_field_panel.draw_field_center:
+            self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
-    def _screen_vector_to_field(self, screen_points=[[0, 0]]):
+        cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         M, v = get_transform_center_basis_to_screen()
-        Minv = np.linalg.inv(M)
-        if type(screen_points) is not np.ndarray:
-            field_points = np.array(screen_points)
-        else:
-            field_points = screen_points
-        field_points = field_points.dot(Minv)
-        field_points = field_points - v
-        return field_points
+        # Move transform iteration to out here ish
+        field_points = np.array([(w.x, w.y) for w in _current_waypoints()])
+        if len(field_points) > 0:
+            screen_points = field_points + v
+            screen_points = screen_points.dot(M)
+            for idx, (sp, w) in enumerate(
+                zip(screen_points, _current_waypoints())
+            ):
+                screenx, screeny = sp
+                screenx = int(screenx)
+                screeny = int(screeny)
+                self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
+                for name, t in _app_state[TFMS].items():
+                    if name not in cr.active_transformations:
+                        print(f'skipping {name} waypoints')
+                        continue
+                    mtx = np.identity(2)
+                    trans_vec = np.array([0, 0])
+                    for s in t.steps:
+                        if s.matrix is not None:
+                            mtx = np.dot(np.array(s.matrix), mtx)
+                        if s.vector is not None:
+                            trans_vec += np.array(s.vector)
+                    # Create a vector of field waypoints
+                    vec = np.array([screenx, screeny]).astype(float)
+                    # Subtract the field offset to translate it to the new
+                    # origin
+                    vec -= np.array([_app_state[FIELD_X_OFFSET],
+                                    _app_state[FIELD_Y_OFFSET]])
+                    # Apply any matrix transformation to it or just use the
+                    # identity matrix in mtx from above.
+                    vec = np.dot(mtx, vec)
+                    # Add the field offset back in
+                    vec += np.array([_app_state[FIELD_X_OFFSET],
+                                    _app_state[FIELD_Y_OFFSET]])
+                    # Now make any final translation to the vector. If none is
+                    # defined we'll juse add the zero vector to it that we
+                    # defined in trans_vec above.
+                    vec += trans_vec
+                    x, y = self._field_to_screen(vec[0], vec[1])
+                    self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
 
-    def _screen_to_field(self, x, y):
-        M, v = get_transform_center_basis_to_screen()
-        Minv = np.linalg.inv(M)
-        field_points = np.array([[x, y]])
-        field_points = field_points.dot(Minv)
-        field_points = field_points - v
-        fieldx = qtr_round(field_points[0][0])
-        fieldy = qtr_round(field_points[0][1])
-        return fieldx, fieldy
-
-    def _field_to_screen(self, x, y):
-        M, v = get_transform_center_basis_to_screen()
-        field_points = np.array([[x, y]])
-        field_points = field_points + v
-        field_points = field_points.dot(M)
-        screenx = int(field_points[0][0])
-        screeny = int(field_points[0][1])
-        return screenx, screeny
-
-    # Clicking on the field can either select or add a node depending
-    # on where it happens.
-    def on_field_click(self, evt):
-        x, y = evt.GetPosition()
-        fieldx, fieldy = self._screen_to_field(x, y)
-        # print(f'Clicky hit at {x},{y}')
-        selnode = self._find_closest_waypoint(
-                fieldx, fieldy, _app_state[WAYPOINT_DISTANCE_LIMIT]
-            )
-        if selnode is None:
-            self.add_node(fieldx, fieldy)
-        else:
-            self.sel_node(fieldx, fieldy)
+            # We can't draw the path until we have at least three waypoints
+            if len(_current_waypoints()) > 2:
+                self._draw_path(dc)
+                pass
 
     # Internal function to draw a waypoint on the field
     def _draw_waypoint(self, dc, x, y, idx, marker_fg, marker_bg):
@@ -611,7 +520,7 @@ class FieldPanel(wx.Panel):
                 ctl1 = wx.Point2D(x1, y1)
                 ctl2 = wx.Point2D(x2, y2)
                 endP = wx.Point2D(endx, endy)
-                if self.show_control_points:
+                if glb_field_panel.show_control_points:
                     # TODO: Figure out how I broke the color on control points
                     gc.SetPen(wx.Pen('blue', 2))
                     dc.DrawCircle(int(ctl1.x), int(ctl1.y), 2)
@@ -660,73 +569,55 @@ class FieldPanel(wx.Panel):
                 closest_waypoint = w
         return closest_waypoint
 
-    # Draw all waypoints and paths on the field
-    def redraw(self):
-        imgname = _app_state[FIELD_BACKGROUND_IMAGE]
-        imgpath = resource_path(imgname)
-        field_blank = (
-            wx.Image(imgpath, wx.BITMAP_TYPE_ANY)
-        )
-        if self.field_bmp is not None:
-            imgx, imgy = self.field_bmp.GetSize()
-            field_blank = field_blank.Scale(imgx, imgy)
-        field_blank = field_blank.ConvertToBitmap()
-        dc = wx.BufferedPaintDC()
-        dc.SetBackgroundBitmap(field_blank)
-        if self.draw_field_center:
-            self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
+    # We use the right click to delete a node that's close to the click
+    def on_field_click_right(self, evt):
+        x, y = evt.GetPosition()
+        x, y = self._screen_to_field(x, y)
+        self.del_node(x, y)
 
-        cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
+    def _screen_vector_to_field(self, screen_points=[[0, 0]]):
         M, v = get_transform_center_basis_to_screen()
-        # Move transform iteration to out here ish
-        field_points = np.array([(w.x, w.y) for w in _current_waypoints()])
-        if len(field_points) > 0:
-            screen_points = field_points + v
-            screen_points = screen_points.dot(M)
-            for idx, (sp, w) in enumerate(
-                zip(screen_points, _current_waypoints())
-            ):
-                screenx, screeny = sp
-                screenx = int(screenx)
-                screeny = int(screeny)
-                self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
-                for name, t in _app_state[TFMS].items():
-                    if name not in cr.active_transformations:
-                        print(f'skipping {name} waypoints')
-                        continue
-                    mtx = np.identity(2)
-                    trans_vec = np.array([0, 0])
-                    for s in t.steps:
-                        if s.matrix is not None:
-                            mtx = np.dot(np.array(s.matrix), mtx)
-                        if s.vector is not None:
-                            trans_vec += np.array(s.vector)
-                    # Create a vector of field waypoints
-                    vec = np.array([screenx, screeny]).astype(float)
-                    # Subtract the field offset to translate it to the new origin
-                    vec -= np.array([_app_state[FIELD_X_OFFSET],
-                                    _app_state[FIELD_Y_OFFSET]])
-                    # Apply any matrix transformation to it or just use the
-                    # identity matrix in mtx from above.
-                    vec = np.dot(mtx, vec)
-                    # Add the field offset back in
-                    vec += np.array([_app_state[FIELD_X_OFFSET],
-                                    _app_state[FIELD_Y_OFFSET]])
-                    # Now make any final translation to the vector. If none is
-                    # defined we'll juse add the zero vector to it that we defined
-                    # in trans_vec above.
-                    vec += trans_vec
-                    x, y = self._field_to_screen(vec[0], vec[1])
-                    self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
+        Minv = np.linalg.inv(M)
+        if type(screen_points) is not np.ndarray:
+            field_points = np.array(screen_points)
+        else:
+            field_points = screen_points
+        field_points = field_points.dot(Minv)
+        field_points = field_points - v
+        return field_points
 
-            # We can't draw the path until we have at least three waypoints
-            if len(_current_waypoints()) > 2:
-                self._draw_path(dc)
-                pass
+    def _screen_to_field(self, x, y):
+        M, v = get_transform_center_basis_to_screen()
+        Minv = np.linalg.inv(M)
+        field_points = np.array([[x, y]])
+        field_points = field_points.dot(Minv)
+        field_points = field_points - v
+        fieldx = qtr_round(field_points[0][0])
+        fieldy = qtr_round(field_points[0][1])
+        return fieldx, fieldy
 
-        # Blast the map back onto the screen with everything drawn
-        del dc
-        self.field_bmp.SetBitmap(field_blank)
+    def _field_to_screen(self, x, y):
+        M, v = get_transform_center_basis_to_screen()
+        field_points = np.array([[x, y]])
+        field_points = field_points + v
+        field_points = field_points.dot(M)
+        screenx = int(field_points[0][0])
+        screeny = int(field_points[0][1])
+        return screenx, screeny
+
+    # Clicking on the field can either select or add a node depending
+    # on where it happens.
+    def on_field_click(self, evt):
+        x, y = evt.GetPosition()
+        fieldx, fieldy = self._screen_to_field(x, y)
+        # print(f'Clicky hit at {x},{y}')
+        selnode = self._find_closest_waypoint(
+                fieldx, fieldy, _app_state[WAYPOINT_DISTANCE_LIMIT]
+            )
+        if selnode is None:
+            self.add_node(fieldx, fieldy)
+        else:
+            self.sel_node(fieldx, fieldy)
 
     # Adds a new waypoint
     @modifies_state
@@ -770,7 +661,8 @@ class FieldPanel(wx.Panel):
         _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints = waypoints
         self._selected_node = new_waypoint
         glb_waypoint_panel.update_waypoint_grid()
-        self.redraw()
+        self.redraw_needed = True
+        self.Refresh()
 
     # Delete the closest waypoint to the click
     # Or if we're not on a waypoint add one here between
@@ -784,7 +676,8 @@ class FieldPanel(wx.Panel):
         current_routine = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         if delnode is not None:
             current_routine.waypoints.remove(delnode)
-            self.redraw()
+            self.redraw_needed = True
+            self.Refresh()
             glb_waypoint_panel.update_waypoint_grid()
 
     # select the closest waypoint to the click for modification
@@ -794,7 +687,121 @@ class FieldPanel(wx.Panel):
         selnode = self._find_closest_waypoint(x, y)
         if selnode is not None:
             self._selected_node = selnode
-        self.redraw()
+        self.redraw_needed = True
+        self.Refresh()
+
+    # Event fires any time the mouse moves on the field drawing
+    @modifies_state
+    def on_mouse_move(self, event):
+        x, y = event.GetPosition()
+        fieldx, fieldy = self._screen_to_field(x, y)
+        # print(f'x: {x}, y: {y} fieldx: {fieldx}, fieldy: {fieldy}')
+
+        # If we're not dragging an object/waypoint then we're just going to
+        # see if the mouse is near a node. If so, we'll highlight it to
+        # indicate that if the user left clicks it will be selected.
+        if not event.Dragging():
+            event.Skip()
+            last_highlight = self._highlight_node
+            self._highlight_node = self._find_closest_waypoint(fieldx, fieldy)
+            # We only wan to redraw the grid if we actually changed the
+            # highlight node
+            if last_highlight != self._highlight_node:
+                self.Refresh()
+            return
+        event.Skip()
+        # print("Dragging position", x, y)
+        # If we're in a drag motion and have a seleted node we need to
+        # update its coordinates to the mouse position and redraw everything.
+        if self._selected_node is not None:
+            self._selected_node.x = fieldx
+            self._selected_node.y = fieldy
+            waypoints = (
+                _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints
+            )
+            idx = waypoints.index(self._selected_node)
+            waypoints[idx].x = fieldx
+            waypoints[idx].y = fieldy
+            glb_waypoint_panel.update_waypoint_data()
+            self.Refresh()
+
+
+
+# A wx Panel that holds the Field drawing portion of the UI
+class FieldPanel(wx.Panel):
+    def __init__(self, parent):
+        self.show_control_points = False
+        self.draw_field_center = True
+        wx.Panel.__init__(self, parent=parent)
+        # Load in the field image
+        # Here any click that happens inside the field area will trigger the
+        # on_field_click function which handles the event.
+
+        # Establish controls for modifying the field properties
+        # Much like the buttons we create labels and text editing boxes
+        field_offset_x_lbl = wx.StaticText(self, label='Field Offset X')
+        self.field_offset_x_txt = wx.TextCtrl(self)
+        self.field_offset_x_txt.ChangeValue(str(_app_state[FIELD_X_OFFSET]))
+        field_offset_y_lbl = wx.StaticText(self, label='Field Offset Y')
+        self.field_offset_y_txt = wx.TextCtrl(self)
+        self.field_offset_y_txt.ChangeValue(str(_app_state[FIELD_Y_OFFSET]))
+
+        draw_field_center_btn = wx.CheckBox(self,
+                                            label='Draw Field Center')
+        show_control_points_btn = wx.CheckBox(self,
+                                              label='Show Control Points')
+        show_control_points_btn.SetValue(self.show_control_points)
+        draw_field_center_btn.SetValue(self.draw_field_center)
+
+        self.field_offset_x_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
+        self.field_offset_y_txt.Bind(wx.EVT_TEXT, self.on_field_offset_change)
+        draw_field_center_btn.Bind(wx.EVT_CHECKBOX,
+                                   self.toggle_draw_field_center)
+        show_control_points_btn.Bind(wx.EVT_CHECKBOX,
+                                     self.toggle_control_points)
+
+        # The BoxSizer is a layout manager that arranges the controls in a box
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        border = 5
+
+        hbox = wx.BoxSizer(wx.HORIZONTAL)
+        xbox = wx.BoxSizer(wx.VERTICAL)
+        xbox.Add(field_offset_x_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        xbox.Add(self.field_offset_x_txt, 0, wx.EXPAND | wx.ALL, border=border)
+
+        ybox = wx.BoxSizer(wx.VERTICAL)
+        ybox.Add(field_offset_y_lbl, 0, wx.EXPAND | wx.ALL, border=border)
+        ybox.Add(self.field_offset_y_txt, 0, wx.EXPAND | wx.ALL, border=border)
+
+        zbox = wx.BoxSizer(wx.VERTICAL)
+        zbox.Add(draw_field_center_btn, 0, wx.EXPAND | wx.ALL, border=border)
+        zbox.Add(show_control_points_btn, 0, wx.EXPAND | wx.ALL, border=border)
+
+        hbox.Add(xbox)
+        hbox.Add(ybox)
+        hbox.Add(zbox)
+        vbox.Add(hbox)
+
+        self.SetSizer(vbox)
+        self.Fit()
+        self.Refresh()
+
+    def toggle_control_points(self, evt):
+        self.show_control_points = not self.show_control_points
+        self.Refresh()
+
+    def toggle_draw_field_center(self, evt):
+        self.draw_field_center = not self.draw_field_center
+        self.Refresh()
+
+    @modifies_state
+    def on_field_offset_change(self, evt):
+        print('offset change')
+        global _app_state
+        _app_state[FIELD_X_OFFSET] = float(self.field_offset_x_txt.GetValue())
+        _app_state[FIELD_Y_OFFSET] = float(self.field_offset_y_txt.GetValue())
+        self.Refresh()
+        return
 
 
 class RoutinePanel(wx.Panel):
@@ -901,7 +908,8 @@ class RoutinePanel(wx.Panel):
         print(f'Selected routine {routine}')
         global glb_field_panel, glb_waypoint_panel
         if glb_field_panel is not None:
-            glb_field_panel.redraw()
+            glb_field_panel.redraw_needed = True
+            glb_field_panel.Refresh()
         if glb_waypoint_panel is not None:
             glb_waypoint_panel.update_waypoint_grid()
         pass
@@ -1002,7 +1010,8 @@ class WaypointPanel(wx.Panel):
                 w.x = newx
             except ValueError:
                 print('Using old value of x, input is invalid')
-        glb_field_panel.redraw()
+        glb_field_panel.redraw_needed = True
+        glb_field_panel.Refresh()
 
     @modifies_state
     def on_waypoint_change_y(self, evt):
@@ -1014,14 +1023,16 @@ class WaypointPanel(wx.Panel):
                 w.y = newy
             except ValueError:
                 print('Using old value of x, input is invalid')
-        glb_field_panel.redraw()
+        glb_field_panel.redraw_needed = True
+        glb_field_panel.Refresh()
 
     # Delete a node based on a UI event from our waypoint "grid"
     @modifies_state
     def on_waypoint_delete(self, evt):
         idx = int(evt.GetEventObject().GetName())
         del _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints[idx]
-        glb_field_panel.redraw()
+        glb_field_panel.redraw_needed = True
+        glb_field_panel.Refresh()
         glb_waypoint_panel.update_waypoint_grid()
 
 
@@ -1038,7 +1049,8 @@ class TransformationPanel(wx.Panel):
         global _app_state
         del _app_state[TFMS][name]
         self.update_transform_display()
-        glb_field_panel.redraw()
+        glb_field_panel.redraw_needed = True
+        glb_field_panel.Refresh()
 
     @modifies_state
     def toggle_transform_visiblity(self, evt):
@@ -1049,7 +1061,8 @@ class TransformationPanel(wx.Panel):
         else:
             cr.active_transformations.append(name)
         self.update_transform_display()
-        glb_field_panel.redraw()
+        glb_field_panel.redraw_needed = True
+        glb_field_panel.Refresh()
 
     def update_transform_display(self):
         if self.main_sizer is not None:
@@ -1145,7 +1158,8 @@ class ControlPanel(ScrolledPanel):
             print('Got a transformation', t.name)
             for s in t.steps:
                 print(s.descr)
-        glb_field_panel.redraw()
+        glb_field_panel.redraw_needed = True
+        glb_field_panel.Refresh()
         self.update_transform_display()
         dlg.Destroy()
 
@@ -1259,7 +1273,7 @@ class TransformDialog(wx.Dialog):
 # above mentioned Panels in the right spots
 class MainWindow(wx.Frame):
     def __init__(self, parent, id):
-        global glb_field_panel, glb_control_panel
+        global glb_field_render, glb_field_panel, glb_control_panel
         wx.Frame.__init__(self,
                           parent,
                           id,
@@ -1269,11 +1283,15 @@ class MainWindow(wx.Frame):
         iconfile = os.path.join('assets', 'web', 'favicon.ico')
         self.SetIcon(wx.Icon(iconfile, wx.BITMAP_TYPE_ICO))
         self.splitter = MultiSplitterWindow(self, style=wx.SP_LIVE_UPDATE)
+        hsplit = wx.SplitterWindow(self.splitter)
+        glb_field_render = FieldRenderPanel(hsplit)
+        glb_field_panel = FieldPanel(hsplit)
         glb_control_panel = ControlPanel(self.splitter)
-        glb_field_panel = FieldPanel(self.splitter)
-        glb_field_panel.redraw()
-        self.splitter.AppendWindow(glb_field_panel,
-                                   sashPos=glb_field_panel.w)
+        hsplit.SplitHorizontally(glb_field_render,
+                                 glb_field_panel)
+        self.splitter.AppendWindow(hsplit,
+                                   sashPos=1200  # TODO: Make this dynamic
+                                   )
         self.splitter.AppendWindow(glb_control_panel)
         self.splitter.Bind(wx.EVT_SPLITTER_SASH_POS_CHANGING,
                            self.on_sash_drag)
@@ -1284,7 +1302,8 @@ class MainWindow(wx.Frame):
         self.SetStatusBar(status_bar)
 
     def on_sash_drag(self, evt):
-        glb_field_panel.redraw()
+        glb_field_panel.redraw_needed = True
+        glb_field_panel.Refresh()
 
     def close_window(self, event):
         self.Destroy()
@@ -1364,6 +1383,7 @@ waypoint_test_json = """
 ]
 """
 
+glb_field_render = None
 glb_field_panel = None
 glb_control_panel = None
 glb_transformation_panel = None
