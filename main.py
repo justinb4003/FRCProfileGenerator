@@ -364,8 +364,7 @@ class FieldRenderPanel(wx.Panel):
         self.field_image = wx.Image(imgpath, wx.BITMAP_TYPE_ANY)
         self.field_orig_x = self.field_image.GetWidth()
         self.field_orig_y = self.field_image.GetHeight()
-        self.field_buffer = wx.EmptyBitmap(self.field_orig_x,
-                                           self.field_orig_y)
+        self.field_buffer = wx.Bitmap(self.field_orig_x, self.field_orig_y)
         self.field_bmp = wx.StaticBitmap(self, -1, self.field_buffer)
         self.field_bmp.Bind(wx.EVT_LEFT_DOWN, self.on_field_click)
         self.field_bmp.Bind(wx.EVT_RIGHT_DOWN, self.on_field_click_right)
@@ -374,6 +373,8 @@ class FieldRenderPanel(wx.Panel):
     def on_idle(self, evt):
         if self.redraw_needed:
             self.redraw()
+            self.redraw_needed = False
+            self.Refresh(False)
 
     def on_paint(self, evt):
         # Create a buffered paint DC.  It will create the real
@@ -385,12 +386,12 @@ class FieldRenderPanel(wx.Panel):
 
     # Draw all waypoints and paths on the field
     def redraw(self):
-        dc = wx.BufferedDC(None, self.field_buffer)
         field_blank = self.field_image
         if self.field_bmp is not None:
             imgx, imgy = self.field_bmp.GetSize()
             field_blank = field_blank.Scale(imgx, imgy)
-        field_blank = field_blank.ConvertToBitmap()
+        self.field_buffer = field_blank.ConvertToBitmap()
+        dc = wx.BufferedDC(None, self.field_buffer)
         if glb_field_panel.draw_field_center:
             self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
@@ -442,6 +443,7 @@ class FieldRenderPanel(wx.Panel):
             if len(_current_waypoints()) > 2:
                 self._draw_path(dc)
                 pass
+        self.field_bmp.SetBitmap(self.field_buffer)
 
     # Internal function to draw a waypoint on the field
     def _draw_waypoint(self, dc, x, y, idx, marker_fg, marker_bg):
@@ -1288,7 +1290,7 @@ class MainWindow(wx.Frame):
         glb_field_panel = FieldPanel(hsplit)
         glb_control_panel = ControlPanel(self.splitter)
         hsplit.SplitHorizontally(glb_field_render,
-                                 glb_field_panel)
+                                 glb_field_panel, sashPosition=600)
         self.splitter.AppendWindow(hsplit,
                                    sashPos=1200  # TODO: Make this dynamic
                                    )
