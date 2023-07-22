@@ -443,6 +443,7 @@ class FieldRenderPanel(wx.Panel):
             if len(_current_waypoints()) > 2:
                 self._draw_path(dc)
                 pass
+        dc.SelectObject(wx.NullBitmap)
         self.field_bmp.SetBitmap(self.field_buffer)
 
     # Internal function to draw a waypoint on the field
@@ -709,6 +710,7 @@ class FieldRenderPanel(wx.Panel):
             # We only wan to redraw the grid if we actually changed the
             # highlight node
             if last_highlight != self._highlight_node:
+                self.redraw_needed = True
                 self.Refresh()
             return
         event.Skip()
@@ -725,6 +727,7 @@ class FieldRenderPanel(wx.Panel):
             waypoints[idx].x = fieldx
             waypoints[idx].y = fieldy
             glb_waypoint_panel.update_waypoint_data()
+            self.redraw_needed = True
             self.Refresh()
 
 
