@@ -384,6 +384,11 @@ class FieldRenderPanel(wx.Panel):
         dc = wx.BufferedPaintDC(self, self.field_buffer)
         del dc
 
+    def force_redraw(self):
+        self.redraw_needed = True
+        self.redraw()
+        self.Refresh()
+
     # Draw all waypoints and paths on the field
     def redraw(self):
         field_blank = self.field_image
@@ -411,7 +416,6 @@ class FieldRenderPanel(wx.Panel):
                 self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
                 for name, t in _app_state[TFMS].items():
                     if name not in cr.active_transformations:
-                        print(f'skipping {name} waypoints')
                         continue
                     mtx = np.identity(2)
                     trans_vec = np.array([0, 0])
@@ -664,8 +668,7 @@ class FieldRenderPanel(wx.Panel):
         _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints = waypoints
         self._selected_node = new_waypoint
         glb_waypoint_panel.update_waypoint_grid()
-        self.redraw_needed = True
-        self.Refresh()
+        self.force_redraw()
 
     # Delete the closest waypoint to the click
     # Or if we're not on a waypoint add one here between
@@ -679,8 +682,7 @@ class FieldRenderPanel(wx.Panel):
         current_routine = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         if delnode is not None:
             current_routine.waypoints.remove(delnode)
-            self.redraw_needed = True
-            self.Refresh()
+            self.force_redraw()
             glb_waypoint_panel.update_waypoint_grid()
 
     # select the closest waypoint to the click for modification
@@ -690,8 +692,7 @@ class FieldRenderPanel(wx.Panel):
         selnode = self._find_closest_waypoint(x, y)
         if selnode is not None:
             self._selected_node = selnode
-        self.redraw_needed = True
-        self.Refresh()
+        self.force_redraw()
 
     # Event fires any time the mouse moves on the field drawing
     @modifies_state
@@ -710,8 +711,7 @@ class FieldRenderPanel(wx.Panel):
             # We only wan to redraw the grid if we actually changed the
             # highlight node
             if last_highlight != self._highlight_node:
-                self.redraw_needed = True
-                self.Refresh()
+                self.force_redraw()
             return
         event.Skip()
         # print("Dragging position", x, y)
@@ -727,8 +727,7 @@ class FieldRenderPanel(wx.Panel):
             waypoints[idx].x = fieldx
             waypoints[idx].y = fieldy
             glb_waypoint_panel.update_waypoint_data()
-            self.redraw_needed = True
-            self.Refresh()
+            self.force_redraw()
 
 
 
@@ -793,11 +792,11 @@ class FieldPanel(wx.Panel):
 
     def toggle_control_points(self, evt):
         self.show_control_points = not self.show_control_points
-        self.Refresh()
+        glb_field_render.force_redraw()
 
     def toggle_draw_field_center(self, evt):
         self.draw_field_center = not self.draw_field_center
-        self.Refresh()
+        glb_field_render.force_redraw()
 
     @modifies_state
     def on_field_offset_change(self, evt):
@@ -911,10 +910,9 @@ class RoutinePanel(wx.Panel):
         routine = evt.GetLabel()
         _app_state[CURRENT_ROUTINE] = routine
         print(f'Selected routine {routine}')
-        global glb_field_panel, glb_waypoint_panel
-        if glb_field_panel is not None:
-            glb_field_panel.redraw_needed = True
-            glb_field_panel.Refresh()
+        global glb_waypoint_panel, glb_field_render
+        if glb_field_render is not None:
+            glb_field_render.force_redraw()
         if glb_waypoint_panel is not None:
             glb_waypoint_panel.update_waypoint_grid()
         pass
@@ -1007,6 +1005,7 @@ class WaypointPanel(wx.Panel):
 
     @modifies_state
     def on_waypoint_change_x(self, evt):
+        global glb_field_render
         routine = _app_state[CURRENT_ROUTINE]
         waypoints = _app_state[ROUTINES][routine].waypoints
         for idx, w in enumerate(waypoints):
@@ -1015,11 +1014,11 @@ class WaypointPanel(wx.Panel):
                 w.x = newx
             except ValueError:
                 print('Using old value of x, input is invalid')
-        glb_field_panel.redraw_needed = True
-        glb_field_panel.Refresh()
+        glb_field_render.force_redraw()
 
     @modifies_state
     def on_waypoint_change_y(self, evt):
+        global glb_field_render
         routine = _app_state[CURRENT_ROUTINE]
         waypoints = _app_state[ROUTINES][routine].waypoints
         for idx, w in enumerate(waypoints):
@@ -1028,16 +1027,15 @@ class WaypointPanel(wx.Panel):
                 w.y = newy
             except ValueError:
                 print('Using old value of x, input is invalid')
-        glb_field_panel.redraw_needed = True
-        glb_field_panel.Refresh()
+        glb_field_render.force_redraw()
 
     # Delete a node based on a UI event from our waypoint "grid"
     @modifies_state
     def on_waypoint_delete(self, evt):
+        global glb_field_render, glb_waypoint_panel
         idx = int(evt.GetEventObject().GetName())
         del _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints[idx]
-        glb_field_panel.redraw_needed = True
-        glb_field_panel.Refresh()
+        glb_field_render.force_redraw()
         glb_waypoint_panel.update_waypoint_grid()
 
 
@@ -1054,8 +1052,7 @@ class TransformationPanel(wx.Panel):
         global _app_state
         del _app_state[TFMS][name]
         self.update_transform_display()
-        glb_field_panel.redraw_needed = True
-        glb_field_panel.Refresh()
+        glb_field_render.force_redraw()
 
     @modifies_state
     def toggle_transform_visiblity(self, evt):
@@ -1066,8 +1063,7 @@ class TransformationPanel(wx.Panel):
         else:
             cr.active_transformations.append(name)
         self.update_transform_display()
-        glb_field_panel.redraw_needed = True
-        glb_field_panel.Refresh()
+        glb_field_render.force_redraw()
 
     def update_transform_display(self):
         if self.main_sizer is not None:
