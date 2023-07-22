@@ -802,10 +802,19 @@ class FieldPanel(wx.Panel):
     def on_field_offset_change(self, evt):
         print('offset change')
         global _app_state
-        _app_state[FIELD_X_OFFSET] = float(self.field_offset_x_txt.GetValue())
-        _app_state[FIELD_Y_OFFSET] = float(self.field_offset_y_txt.GetValue())
-        self.Refresh()
-        return
+        try:
+            _app_state[FIELD_X_OFFSET] = float(
+                self.field_offset_x_txt.GetValue()
+            )
+        except ValueError:
+            pass
+        try:
+            _app_state[FIELD_Y_OFFSET] = float(
+                self.field_offset_y_txt.GetValue()
+            )
+        except ValueError:
+            pass
+        glb_field_render.force_redraw()
 
 
 class RoutinePanel(wx.Panel):
