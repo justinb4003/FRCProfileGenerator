@@ -1272,8 +1272,11 @@ class MainWindow(wx.Frame):
                           'Profile Generation',
                           size=(1660, 800))
 
-        iconfile = os.path.join('assets', 'web', 'favicon.ico')
-        self.SetIcon(wx.Icon(iconfile, wx.BITMAP_TYPE_ICO))
+        iconfile = resource_path(
+            os.path.join('assets', 'web', 'favicon.ico')
+        )
+        if os.name != 'nt':
+            self.SetIcon(wx.Icon(iconfile, wx.BITMAP_TYPE_ICO))
         self.splitter = MultiSplitterWindow(self, style=wx.SP_LIVE_UPDATE)
         hsplit = wx.SplitterWindow(self.splitter)
         glb_field_render = FieldRenderPanel(hsplit)
