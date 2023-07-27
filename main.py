@@ -730,7 +730,6 @@ class FieldRenderPanel(wx.Panel):
             self.force_redraw()
 
 
-
 # A wx Panel that holds the Field drawing portion of the UI
 class FieldPanel(wx.Panel):
     def __init__(self, parent):
@@ -764,7 +763,9 @@ class FieldPanel(wx.Panel):
         show_control_points_btn.Bind(wx.EVT_CHECKBOX,
                                      self.toggle_control_points)
 
+
         # The BoxSizer is a layout manager that arranges the controls in a box
+        # which can be made vertical or horizontal.
         vbox = wx.BoxSizer(wx.VERTICAL)
         border = 5
 
@@ -1056,6 +1057,20 @@ class TransformationPanel(wx.Panel):
         self.update_transform_display()
 
     @modifies_state
+    def add_transformation(self, evt):
+        global _app_state
+        dlg = TransformDialog(None)
+        t = dlg.ShowModal()
+        for n, t in _app_state[TFMS].items():
+            print('Got a transformation', t.name)
+            for s in t.steps:
+                print(s.descr)
+        glb_field_panel.redraw_needed = True
+        glb_field_panel.Refresh()
+        self.update_transform_display()
+        dlg.Destroy()
+
+    @modifies_state
     def delete_transformation(self, evt):
         name = evt.GetEventObject().GetName()
         global _app_state
@@ -1090,14 +1105,9 @@ class TransformationPanel(wx.Panel):
             toggle_view = wx.Button(self, wx.ID_ANY, label=view_state, name=n)
             delete = wx.Button(self, wx.ID_ANY, label='Delete', name=n)
             edit_transform = wx.Button(self, wx.ID_ANY, label='...', name=n)
-            toggle_view.Bind(
-                wx.EVT_BUTTON,
-                self.toggle_transform_visiblity,
-            )
-            delete.Bind(
-                wx.EVT_BUTTON,
-                self.delete_transformation,
-            )
+            toggle_view.Bind( wx.EVT_BUTTON, self.toggle_transform_visiblity)
+            delete.Bind( wx.EVT_BUTTON, self.delete_transformation)
+            edit_transform.Bind(wx.EVT_BUTTON, self.edit_transformation)
 
             row.Add(lbl, wx.EXPAND)
             row.Add(delete, wx.EXPAND, border=3)
@@ -1105,8 +1115,31 @@ class TransformationPanel(wx.Panel):
             row.Add(edit_transform, wx.EXPAND, border=3)
 
             self.main_sizer.Add(row, 0, wx.SHRINK | wx.ALL, border=5)
+
+        add_transformation_btn = wx.Button(self,
+                                           label='Add Transformation')
+
+        add_transformation_btn.Bind(wx.EVT_BUTTON, self.add_transformation)
+        self.main_sizer.Add(add_transformation_btn, 0,
+                            wx.EXPAND | wx.ALL, border=8)
         self.SetSizerAndFit(self.main_sizer)
         self.Layout()
+
+    @modifies_state
+    def edit_transformation(self, evt):
+        global _app_state
+        name = evt.GetEventObject().GetName()
+        print('edit', name)
+        dlg = TransformDialog(None)
+        t = dlg.ShowModal()
+        for n, t in _app_state[TFMS].items():
+            print('Got a transformation', t.name)
+            for s in t.steps:
+                print(s.descr)
+        glb_field_panel.redraw_needed = True
+        glb_field_panel.Refresh()
+        self.update_transform_display()
+        dlg.Destroy()
 
 
 # A wx Panel that holds the controls on the right side, or 'control' panel
@@ -1122,13 +1155,9 @@ class ControlPanel(ScrolledPanel):
         # Create button objects. By themselves they do nothing
         export_profile_btn = wx.Button(self,
                                        label='Export Profile')
-        add_transformation_btn = wx.Button(self,
-                                           label='Add Transformation')
-
         # Now we 'bind' events from the controls to functions within the
         # application that can handle them.
         # Button click events
-        add_transformation_btn.Bind(wx.EVT_BUTTON, self.add_transformation)
         export_profile_btn.Bind(wx.EVT_BUTTON, self.export_profile)
 
         # Now we pack the elements into a layout element that will size
@@ -1153,25 +1182,10 @@ class ControlPanel(ScrolledPanel):
                  border=border)
 
         vbox.AddSpacer(8)
-        vbox.Add(add_transformation_btn, 0, wx.EXPAND | wx.ALL, border=border)
         vbox.Add(export_profile_btn, 0, wx.EXPAND | wx.ALL, border=border)
 
         self.SetSizer(vbox)
         self.Fit()
-
-    @modifies_state
-    def add_transformation(self, evt):
-        global _app_state
-        dlg = TransformDialog(None)
-        t = dlg.ShowModal()
-        for n, t in _app_state[TFMS].items():
-            print('Got a transformation', t.name)
-            for s in t.steps:
-                print(s.descr)
-        glb_field_panel.redraw_needed = True
-        glb_field_panel.Refresh()
-        self.update_transform_display()
-        dlg.Destroy()
 
     # TODO: Not complete at all yet.
     def export_profile(self, evt):
@@ -1276,6 +1290,7 @@ class TransformDialog(wx.Dialog):
         self.EndModal(True)
 
     def cancel_dialog(self, evt):
+        self._transformation = None
         self.EndModal(False)
 
 
