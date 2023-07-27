@@ -990,7 +990,7 @@ class WaypointPanel(wx.Panel):
             y_txt.Bind(wx.EVT_TEXT, self.on_waypoint_change_y)
             self.waypoint_x_list.append(x_txt)
             self.waypoint_y_list.append(y_txt)
-            del_btn = wx.Button(self, name=str(idx), label='-', size=(35, -1))
+            del_btn = wx.Button(self, name=str(idx), label='X', size=(35, -1))
             del_btn.Bind(wx.EVT_BUTTON, self.on_waypoint_delete)
             wbox.Add(wx.StaticText(self, label=f'{idx}'), 0, wx.EXPAND)
             wbox.AddSpacer(spacing)
@@ -1131,9 +1131,10 @@ class TransformationPanel(wx.Panel):
         name = evt.GetEventObject().GetName()
         print('edit', name)
         dlg = TransformDialog(None)
-        t = dlg.ShowModal()
+        dlg.set_edit(_app_state[TFMS][name], name)
+        _ = dlg.ShowModal()
         for n, t in _app_state[TFMS].items():
-            print('Got a transformation', t.name)
+            print('Got a transformation', n)
             for s in t.steps:
                 print(s.descr)
         glb_field_panel.redraw_needed = True
@@ -1202,6 +1203,7 @@ class TransformDialog(wx.Dialog):
     _stepbox: wx.BoxSizer = wx.BoxSizer(wx.VERTICAL)
 
     def __init__(self, *args, **kw):
+
         super(TransformDialog, self).__init__(*args, **kw)
 
         self._transformation = Transformation()
@@ -1260,13 +1262,33 @@ class TransformDialog(wx.Dialog):
         self.SetSizer(self._mainvbox)
         self.Fit()
 
+    def set_edit(self, t, name):
+        self._transformation = deepcopy(t)
+        self._orig_transformation = deepcopy(t)
+        self._orig_name = name
+        self.transform_name_txt.ChangeValue(name)
+        self.update_steps_display()
+
     def update_steps_display(self):
         self._stepbox.Clear(True)
         for ts in self._transformation.steps:
-            self._stepbox.Add(wx.StaticText(self, label=ts.descr))
+            row = wx.BoxSizer(wx.HORIZONTAL)
+            del_button = wx.Button(self, label='X', size=(20, 20),
+                                   name=ts.descr)
+            del_button.Bind(wx.EVT_BUTTON, self.delete_step)
+            row.Add(del_button)
+            row.AddSpacer(4)
+            row.Add(wx.StaticText(self, label=ts.descr))
+            self._stepbox.Add(row)
             self._stepbox.AddSpacer(3)
         self.SetSizer(self._mainvbox)
         self.Fit()
+
+    def delete_step(self, evt):
+        descr = evt.GetEventObject().GetName()
+        index = [s.descr for s in self._transformation.steps].index(descr)
+        del self._transformation.steps[index]
+        self.update_steps_display()
 
     def add_step(self, evt):
         s = None
