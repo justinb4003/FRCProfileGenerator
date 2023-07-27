@@ -976,12 +976,11 @@ class WaypointPanel(wx.Panel):
             )
         routine = _app_state[CURRENT_ROUTINE]
         waypoints = _app_state[ROUTINES][routine].waypoints
-        idx = 0
         spacing = 4
         vbox = wx.BoxSizer(wx.VERTICAL)
         self.waypoint_x_list = []
         self.waypoint_y_list = []
-        for w in waypoints:
+        for idx, w in enumerate(waypoints):
             # Create a box for each waypoint
             wbox = wx.BoxSizer(wx.HORIZONTAL)
             x_txt = wx.TextCtrl(self)
@@ -1003,7 +1002,6 @@ class WaypointPanel(wx.Panel):
             # Add that waypoint to our vertical list
             vbox.Add(wbox, 0, wx.EXPAND)
             vbox.AddSpacer(spacing)
-            idx += 1
         self.update_waypoint_data()
         # Add the vertical list into the 'grid' area we have for the list
         self.waypoint_grid.Add(vbox)
