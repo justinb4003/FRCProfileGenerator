@@ -400,53 +400,53 @@ class FieldRenderPanel(wx.Panel):
         if glb_field_panel.draw_field_center:
             self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
-        cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         M, v = get_transform_center_basis_to_screen()
-        # Move transform iteration to out here ish
-        field_points = np.array([(w.x, w.y) for w in _current_waypoints()])
-        if len(field_points) > 0:
-            screen_points = field_points + v
+        field_offset_vec = np.array([_app_state[FIELD_X_OFFSET],
+                                     _app_state[FIELD_Y_OFFSET]])
+        cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
+        for name, path_transformation in (
+            zip([None] + list(_app_state[TFMS].keys()),
+                [None] + list(_app_state[TFMS].values())
+                )):
+            final_matrix = np.identity(2)
+            final_vector = np.array([0, 0])
+            if path_transformation is not None:
+                if name not in cr.active_transformations:
+                    continue
+                for s in path_transformation.steps:
+                    if s.matrix is not None:
+                        final_matrix = np.dot(np.array(s.matrix), final_matrix)
+                    elif s.vector is not None:
+                        final_vector += np.array(s.vector)
+                    else:
+                        print('unhandled ?')
+
+            points = np.array([(w.x, w.y) for w in _current_waypoints()])
+            points -= field_offset_vec
+            points = np.array(
+                [final_matrix.dot([w[0], w[1]]).astype(float) for w in points]
+            )
+            points += field_offset_vec
+            points += final_vector
+            screen_points = points + v
             screen_points = screen_points.dot(M)
+
             for idx, (sp, w) in enumerate(
                 zip(screen_points, _current_waypoints())
             ):
                 screenx, screeny = sp
                 screenx = int(screenx)
                 screeny = int(screeny)
-                self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
-                for name, t in _app_state[TFMS].items():
-                    if name not in cr.active_transformations:
-                        continue
-                    mtx = np.identity(2)
-                    trans_vec = np.array([0, 0])
-                    for s in t.steps:
-                        if s.matrix is not None:
-                            mtx = np.dot(np.array(s.matrix), mtx)
-                        if s.vector is not None:
-                            trans_vec += np.array(s.vector)
-                    # Create a vector of field waypoints
-                    vec = np.array([screenx, screeny]).astype(float)
-                    # Subtract the field offset to translate it to the new
-                    # origin
-                    vec -= np.array([_app_state[FIELD_X_OFFSET],
-                                    _app_state[FIELD_Y_OFFSET]])
-                    # Apply any matrix transformation to it or just use the
-                    # identity matrix in mtx from above.
-                    vec = np.dot(mtx, vec)
-                    # Add the field offset back in
-                    vec += np.array([_app_state[FIELD_X_OFFSET],
-                                    _app_state[FIELD_Y_OFFSET]])
-                    # Now make any final translation to the vector. If none is
-                    # defined we'll juse add the zero vector to it that we
-                    # defined in trans_vec above.
-                    vec += trans_vec
-                    x, y = self._field_to_screen(vec[0], vec[1])
-                    self._draw_waypoint(dc, x, y, idx, 'orange', 'orange')
+                if path_transformation is None:
+                    self._draw_orig_waypoint(dc, w, screenx, screeny, idx)
+                else:
+                    self._draw_waypoint(dc, screenx, screeny, idx,
+                                        'orange', 'orange')
 
-            # We can't draw the path until we have at least three waypoints
-            if len(_current_waypoints()) > 2:
-                self._draw_path(dc)
-                pass
+        # We can't draw the path until we have at least three waypoints
+        if len(_current_waypoints()) > 2:
+            self._draw_path(dc)
+            pass
         dc.SelectObject(wx.NullBitmap)
         self.field_bmp.SetBitmap(self.field_buffer)
 
@@ -477,6 +477,8 @@ class FieldRenderPanel(wx.Panel):
     def _draw_path(self, dc):
         gc = wx.GraphicsContext.Create(dc)
 
+        field_offset_vec = np.array([_app_state[FIELD_X_OFFSET],
+                                     _app_state[FIELD_Y_OFFSET]])
         cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         for name, path_transformation in (
             zip([None] + list(_app_state[TFMS].keys()),
@@ -496,15 +498,13 @@ class FieldRenderPanel(wx.Panel):
                     else:
                         print('unhandled ?')
             points = np.array([[w.x, w.y] for w in _current_waypoints()])
-            points -= np.array([_app_state[FIELD_X_OFFSET],
-                                _app_state[FIELD_Y_OFFSET]])
+            points -= field_offset_vec
             points = np.array(
                 [final_matrix.dot(
                     [w[0], w[1]]
                  ).astype(float) for w in points]
             )
-            points += np.array([_app_state[FIELD_X_OFFSET],
-                                _app_state[FIELD_Y_OFFSET]])
+            points += field_offset_vec
             points += final_vector
             """
             print('orig:')
@@ -1082,8 +1082,10 @@ class TransformationPanel(wx.Panel):
         cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         if name in cr.active_transformations:
             cr.active_transformations.remove(name)
+            print('Removing', name)
         else:
             cr.active_transformations.append(name)
+            print('Adding', name)
         self.update_transform_display()
         glb_field_render.force_redraw()
 
@@ -1103,8 +1105,8 @@ class TransformationPanel(wx.Panel):
             toggle_view = wx.Button(self, wx.ID_ANY, label=view_state, name=n)
             delete = wx.Button(self, wx.ID_ANY, label='Delete', name=n)
             edit_transform = wx.Button(self, wx.ID_ANY, label='...', name=n)
-            toggle_view.Bind( wx.EVT_BUTTON, self.toggle_transform_visiblity)
-            delete.Bind( wx.EVT_BUTTON, self.delete_transformation)
+            toggle_view.Bind(wx.EVT_BUTTON, self.toggle_transform_visiblity)
+            delete.Bind(wx.EVT_BUTTON, self.delete_transformation)
             edit_transform.Bind(wx.EVT_BUTTON, self.edit_transformation)
 
             row.Add(lbl, wx.EXPAND)
@@ -1227,11 +1229,24 @@ class TransformDialog(wx.Dialog):
         spacing = 8
 
         self._mainvbox.AddSpacer(spacing)
-        self._mainvbox.Add(self._stepbox)
-        self._mainvbox.AddSpacer(spacing)
         self._mainvbox.Add(transform_lbl, 0, ELR, border=border)
         self._mainvbox.AddSpacer(spacing)
         self._mainvbox.Add(self.transform_name_txt, 0, ELR, border=border)
+        self._mainvbox.AddSpacer(spacing)
+
+        # Display the existing steps in this transformation
+
+        self._mainvbox.AddSpacer(spacing/2)
+        self._mainvbox.Add(wx.StaticText(self, label='Steps'),
+                           0, ELR, border=border)
+        self._mainvbox.AddSpacer(spacing/2)
+        self._mainvbox.Add(wx.StaticLine(self), 0, ELR, border=border)
+        self._mainvbox.AddSpacer(spacing/2)
+        self._mainvbox.Add(self._stepbox, 0, ELR, border=border)
+        self._mainvbox.AddSpacer(spacing/2)
+        self._mainvbox.Add(wx.StaticLine(self), 0, ELR, border=border)
+        self._mainvbox.AddSpacer(spacing/2)
+
         self._mainvbox.AddSpacer(spacing)
         self._mainvbox.Add(self.mirrorX_rad, 0, ELR, border=border)
         self._mainvbox.AddSpacer(spacing)
@@ -1274,10 +1289,10 @@ class TransformDialog(wx.Dialog):
             del_button = wx.Button(self, label='X', size=(20, 20),
                                    name=ts.descr)
             del_button.Bind(wx.EVT_BUTTON, self.delete_step)
-            row.Add(del_button)
+            row.Add(del_button, border=8)
             row.AddSpacer(4)
             row.Add(wx.StaticText(self, label=ts.descr))
-            self._stepbox.Add(row)
+            self._stepbox.Add(row, border=8)
             self._stepbox.AddSpacer(3)
         self.SetSizer(self._mainvbox)
         self.Fit()
