@@ -1388,11 +1388,8 @@ glb_routine_panel = None
 
 # here's how we fire up the wxPython app
 if __name__ == '__main__':
-    newstate = get_app_state()
-    if newstate is not None:
-        _app_state = newstate
-    else:
-        _app_state = get_default_app_state()
+    oldstate = get_app_state()
+    _app_state = oldstate if not None else get_default_app_state()
     app = wx.App()
     frame = MainWindow(parent=None, id=-1)
     frame.Show()
