@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Using flake8 for linting
 import os
 import wx
 import sys
@@ -16,7 +17,10 @@ from math import sqrt, cos, sin, radians
 from wx.lib.scrolledpanel import ScrolledPanel
 from wx.lib.splitter import MultiSplitterWindow
 
-# Using flake8 for linting
+
+# Constants that aren't likely to change:
+FIELD_X_INCHES = 54*12
+FIELD_Y_INCHES = 27*12
 
 
 # Round off a value to the nearest quarter. Handy since we're dealing with
@@ -24,11 +28,6 @@ from wx.lib.splitter import MultiSplitterWindow
 # corresponds to a mouse click on the sceen.
 def qtr_round(x):
     return round(x*4)/4
-
-
-# Constants that aren't likely to change:
-FIELD_X_INCHES = 54*12
-FIELD_Y_INCHES = 27*12
 
 
 def get_scale_matrix():
@@ -137,6 +136,7 @@ MIRROR_X_MATRIX = [[1,  0],
                    [0, -1]]
 
 
+# Constants for our _app_state dictionary
 FIELD_BACKGROUND_IMAGE = 'field_background_img'
 FIELD_X_OFFSET = 'field_x_offset'
 FIELD_Y_OFFSET = 'field_y_offset'
@@ -260,20 +260,13 @@ def pp(obj):
                      default=serialize))
 
 
-# Made our own distance function instead of using Python's built in
-# math.dist because I didn't know it existed.
-# JJB: I also implemented it wrong so back to Python's implementation it is.
-def dist(x1, y1, x2, y2):
-    return math.dist([x1, y1], [x2, y2])
-
-
 # We can use Heron's formula to find the height of a triangle given
 # the lengths of the sides.
 # This used to detect when we click between two existing points.
 def triangle_height(way1, way2, way3):
-    a = dist(way2.x, way2.y, way3.x, way3.y)
-    b = dist(way1.x, way1.y, way2.x, way2.y)
-    c = dist(way3.x, way3.y, way1.x, way1.y)
+    a = math.dist([way2.x, way2.y], [way3.x, way3.y])
+    b = math.dist([way1.x, way1.y], [way2.x, way2.y])
+    c = math.dist([way3.x, way3.y], [way1.x, way1.y])
 
     s = (a + b + c) / 2
     A = sqrt(s * (s - a) * (s - b) * (s - c))
@@ -397,6 +390,7 @@ class FieldRenderPanel(wx.Panel):
             field_blank = field_blank.Scale(imgx, imgy)
         self.field_buffer = field_blank.ConvertToBitmap()
         dc = wx.BufferedDC(None, self.field_buffer)
+        gc = wx.GraphicsContext.Create(dc)
         if glb_field_panel.draw_field_center:
             self._draw_field_center(dc, _app_state[CROSSHAIR_LENGTH])
 
@@ -404,12 +398,14 @@ class FieldRenderPanel(wx.Panel):
         field_offset_vec = np.array([_app_state[FIELD_X_OFFSET],
                                      _app_state[FIELD_Y_OFFSET]])
         cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
-        for name, path_transformation in (
-            zip([None] + list(_app_state[TFMS].keys()),
-                [None] + list(_app_state[TFMS].values())
-                )):
+        for name, path_transformation in zip(
+                [None] + list(_app_state[TFMS].keys()),
+                [None] + list(_app_state[TFMS].values())):
             final_matrix = np.identity(2)
             final_vector = np.array([0, 0])
+            # Our first pass is w/ None, so no transformation takes place
+            # but for the others we need to alter a matrix and vector
+            # that will be applied to the path.
             if path_transformation is not None:
                 if name not in cr.active_transformations:
                     continue
@@ -431,6 +427,28 @@ class FieldRenderPanel(wx.Panel):
             screen_points = points + v
             screen_points = screen_points.dot(M)
 
+            # Draw path
+            A, B = get_bezier_coef(screen_points)
+            firstx, firsty = screen_points[0][0], screen_points[0][1]
+            path = gc.CreatePath()
+            path.MoveToPoint(firstx, firsty)
+            for end, ctl1P, ctl2P in zip(screen_points[1:], A, B):
+                x1, y1 = ctl1P[0], ctl1P[1]
+                x2, y2 = ctl2P[0], ctl2P[1]
+                endx, endy = end[0], end[1]
+                ctl1 = wx.Point2D(x1, y1)
+                ctl2 = wx.Point2D(x2, y2)
+                endP = wx.Point2D(endx, endy)
+                if glb_field_panel.show_control_points:
+                    # TODO: Figure out how I broke the color on control points
+                    dc.SetPen(wx.Pen('magenta', 4))
+                    dc.DrawCircle(int(ctl1.x), int(ctl1.y), 2)
+                    dc.DrawCircle(int(ctl2.x), int(ctl2.y), 2)
+                path.AddCurveToPoint(ctl1, ctl2, endP)
+            gc.SetPen(wx.Pen('red', 2))
+            gc.StrokePath(path)
+
+            # Draw waypoints
             for idx, (sp, w) in enumerate(
                 zip(screen_points, _current_waypoints())
             ):
@@ -443,10 +461,6 @@ class FieldRenderPanel(wx.Panel):
                     self._draw_waypoint(dc, screenx, screeny, idx,
                                         'orange', 'orange')
 
-        # We can't draw the path until we have at least three waypoints
-        if len(_current_waypoints()) > 2:
-            self._draw_path(dc)
-            pass
         dc.SelectObject(wx.NullBitmap)
         self.field_bmp.SetBitmap(self.field_buffer)
 
@@ -471,70 +485,6 @@ class FieldRenderPanel(wx.Panel):
         if self._selected_node == w:
             bgcolor = 'orange'
         self._draw_waypoint(dc, screenx, screeny, idx, 'red', bgcolor)
-
-    # Draw the entire path between all of our waypoints and all of the
-    # transformations we've defined and asked to be visible.
-    def _draw_path(self, dc):
-        gc = wx.GraphicsContext.Create(dc)
-
-        field_offset_vec = np.array([_app_state[FIELD_X_OFFSET],
-                                     _app_state[FIELD_Y_OFFSET]])
-        cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
-        for name, path_transformation in (
-            zip([None] + list(_app_state[TFMS].keys()),
-                [None] + list(_app_state[TFMS].values())
-                )):
-            path = gc.CreatePath()
-            final_matrix = np.identity(2)
-            final_vector = np.array([0, 0])
-            if path_transformation is not None:
-                if name not in cr.active_transformations:
-                    continue
-                for s in path_transformation.steps:
-                    if s.matrix is not None:
-                        final_matrix = np.dot(np.array(s.matrix), final_matrix)
-                    elif s.vector is not None:
-                        final_vector += np.array(s.vector)
-                    else:
-                        print('unhandled ?')
-            points = np.array([[w.x, w.y] for w in _current_waypoints()])
-            points -= field_offset_vec
-            points = np.array(
-                [final_matrix.dot(
-                    [w[0], w[1]]
-                 ).astype(float) for w in points]
-            )
-            points += field_offset_vec
-            points += final_vector
-            """
-            print('orig:')
-            print(points)
-            print('final:')
-            print(points)
-            print('-----')
-            """
-            # Find control points for Bezier curves
-            M, v = get_transform_center_basis_to_screen()
-            screen_points = points + v
-            screen_points = screen_points.dot(M)
-            A, B = get_bezier_coef(screen_points)
-            firstx, firsty = screen_points[0][0], screen_points[0][1]
-            path.MoveToPoint(firstx, firsty)
-            for end, ctl1P, ctl2P in zip(screen_points[1:], A, B):
-                x1, y1 = ctl1P[0], ctl1P[1]
-                x2, y2 = ctl2P[0], ctl2P[1]
-                endx, endy = end[0], end[1]
-                ctl1 = wx.Point2D(x1, y1)
-                ctl2 = wx.Point2D(x2, y2)
-                endP = wx.Point2D(endx, endy)
-                if glb_field_panel.show_control_points:
-                    # TODO: Figure out how I broke the color on control points
-                    gc.SetPen(wx.Pen('blue', 2))
-                    dc.DrawCircle(int(ctl1.x), int(ctl1.y), 2)
-                    dc.DrawCircle(int(ctl2.x), int(ctl2.y), 2)
-                path.AddCurveToPoint(ctl1, ctl2, endP)
-            gc.SetPen(wx.Pen('red', 2))
-            gc.StrokePath(path)
 
     # Draw a crosshairs on the field center, or what we consider center
     # for all mirror and rotation operations.
@@ -563,14 +513,11 @@ class FieldRenderPanel(wx.Panel):
     # click so we know which one the users wishes to operate on.
     # The distance_limit threshold sets a max distance the user can be away
     # from the center of a point before we disregard it.
-    def _find_closest_waypoint(
-            self, x, y,
-            distance_limit=15,
-            ):
+    def _find_closest_waypoint(self, x, y, distance_limit=25):
         closest_distance = distance_limit + 1
         closest_waypoint = None
         for w in _current_waypoints():
-            d = dist(x, y, w.x, w.y)
+            d = math.dist([x, y], [w.x, w.y])
             if d < distance_limit and d < closest_distance:
                 closest_distance = d
                 closest_waypoint = w
@@ -581,17 +528,6 @@ class FieldRenderPanel(wx.Panel):
         x, y = evt.GetPosition()
         x, y = self._screen_to_field(x, y)
         self.del_node(x, y)
-
-    def _screen_vector_to_field(self, screen_points=[[0, 0]]):
-        M, v = get_transform_center_basis_to_screen()
-        Minv = np.linalg.inv(M)
-        if type(screen_points) is not np.ndarray:
-            field_points = np.array(screen_points)
-        else:
-            field_points = screen_points
-        field_points = field_points.dot(Minv)
-        field_points = field_points - v
-        return field_points
 
     def _screen_to_field(self, x, y):
         M, v = get_transform_center_basis_to_screen()
