@@ -999,8 +999,7 @@ class TransformationPanel(wx.Panel):
             print('Got a transformation', t.name)
             for s in t.steps:
                 print(s.descr)
-        glb_field_panel.redraw_needed = True
-        glb_field_panel.Refresh()
+        glb_field_panel.force_redraw()
         self.update_transform_display()
         dlg.Destroy()
 
@@ -1063,7 +1062,7 @@ class TransformationPanel(wx.Panel):
 
     @modifies_state
     def edit_transformation(self, evt):
-        global _app_state
+        global _app_state, glb_field_render
         name = evt.GetEventObject().GetName()
         print('edit', name)
         dlg = TransformDialog(None)
@@ -1073,8 +1072,7 @@ class TransformationPanel(wx.Panel):
             print('Got a transformation', n)
             for s in t.steps:
                 print(s.descr)
-        glb_field_panel.redraw_needed = True
-        glb_field_panel.Refresh()
+        glb_field_render.force_redraw()
         self.update_transform_display()
         dlg.Destroy()
 
@@ -1148,7 +1146,8 @@ class TransformDialog(wx.Dialog):
         self.transform_name_txt = wx.TextCtrl(self)
         self.mirrorX_rad = wx.RadioButton(self, label='Mirror X')
         self.mirrorY_rad = wx.RadioButton(self, label='Mirror Y')
-        self.rotate_rad = wx.RadioButton(self, label='Rotate by X degrees')
+        self.rotate_rad = wx.RadioButton(self,
+                                         label='Rotate by \u03B8 degrees')
         self.rotate_txt = wx.TextCtrl(self)
         add_step_btn = wx.Button(self, label='Add Step')
         done_btn = wx.Button(self, label='Done')
@@ -1172,16 +1171,16 @@ class TransformDialog(wx.Dialog):
 
         # Display the existing steps in this transformation
 
-        self._mainvbox.AddSpacer(spacing/2)
+        self._mainvbox.AddSpacer(spacing)
         self._mainvbox.Add(wx.StaticText(self, label='Steps'),
                            0, ELR, border=border)
-        self._mainvbox.AddSpacer(spacing/2)
+        self._mainvbox.AddSpacer(spacing)
         self._mainvbox.Add(wx.StaticLine(self), 0, ELR, border=border)
-        self._mainvbox.AddSpacer(spacing/2)
+        self._mainvbox.AddSpacer(spacing)
         self._mainvbox.Add(self._stepbox, 0, ELR, border=border)
-        self._mainvbox.AddSpacer(spacing/2)
+        self._mainvbox.AddSpacer(spacing)
         self._mainvbox.Add(wx.StaticLine(self), 0, ELR, border=border)
-        self._mainvbox.AddSpacer(spacing/2)
+        self._mainvbox.AddSpacer(spacing)
 
         self._mainvbox.AddSpacer(spacing)
         self._mainvbox.Add(self.mirrorX_rad, 0, ELR, border=border)
@@ -1298,8 +1297,7 @@ class MainWindow(wx.Frame):
         self.SetStatusBar(status_bar)
 
     def on_sash_drag(self, evt):
-        glb_field_panel.redraw_needed = True
-        glb_field_panel.Refresh()
+        glb_field_panel.force_redraw()
 
     def close_window(self, event):
         self.Destroy()
