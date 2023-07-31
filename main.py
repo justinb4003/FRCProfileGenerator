@@ -50,9 +50,17 @@ def get_scale_matrix():
     return np.array(M)
 
 
+# Returns a matrix and vector that can be used to transform a point from
+# our field coordinates where 0,0 is the center of the field to screen where
+# 0,0 is the upper left corner. The vector handles the offset of the field
+# and the scaling matrix is used to size it properly for the screen.
 def get_transform_center_basis_to_screen():
-    v = [(54/2*12), (27/2*12)]
+    v = [(FIELD_X_INCHES/2), (FIELD_Y_INCHES/2)]
     return get_scale_matrix(), np.array(v)
+
+
+def _current_waypoints():
+    return _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints
 
 
 # Define a type that can hold a waypoint's data.
@@ -113,6 +121,9 @@ class Transformation():
         return self.__str__()
 
 
+# Container for what will be selected eventually on the dashboard before
+# running an auton. It allows us to name a routine (like 'Pick one piece' or
+# 'leave community')
 class Routine():
     name: str = ''
     waypoints: List[Waypoint] = []
@@ -125,14 +136,10 @@ class Routine():
         return self.__str__()
 
 
-def _current_waypoints():
-    return _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]].waypoints
-
-
 # Very routine matrices for mirroring over X or Y axis
-MIRROR_Y_MATRIX = [[-1, 0],
+MIRROR_X_MATRIX = [[-1, 0],
                    [ 0, 1]]  # noqa
-MIRROR_X_MATRIX = [[1,  0],
+MIRROR_Y_MATRIX = [[1,  0],
                    [0, -1]]
 
 
@@ -191,7 +198,7 @@ def get_default_app_state():
 # This function is used a function decorator:
 # https://dbader.org/blog/python-decorators
 # What this meeans is when you place '@modifies_state' above a function
-# this function will run, but insice the 'wrapper' method we will call
+# this function will run, but inside the 'wrapper' method we will call
 # the method that you've placed the decorator above. This allows us to
 # do some work before and after the function you've decorated runs.
 # In this case we are storing the app state to disk after the function
@@ -363,6 +370,10 @@ class FieldRenderPanel(wx.Panel):
         self.field_bmp.Bind(wx.EVT_RIGHT_DOWN, self.on_field_click_right)
         self.field_bmp.Bind(wx.EVT_MOTION, self.on_mouse_move)
 
+    # When no actiity in the app is occuring we'll hit this method and
+    # if the data says we need to redraw the window we will do that. This
+    # will force the on_paint method to be called where the updated bitmap
+    # is blitted to the screen
     def on_idle(self, evt):
         if self.redraw_needed:
             self.redraw()
@@ -440,7 +451,6 @@ class FieldRenderPanel(wx.Panel):
                 ctl2 = wx.Point2D(x2, y2)
                 endP = wx.Point2D(endx, endy)
                 if glb_field_panel.show_control_points:
-                    # TODO: Figure out how I broke the color on control points
                     dc.SetPen(wx.Pen('magenta', 4))
                     dc.DrawCircle(int(ctl1.x), int(ctl1.y), 2)
                     dc.DrawCircle(int(ctl2.x), int(ctl2.y), 2)
@@ -566,7 +576,6 @@ class FieldRenderPanel(wx.Panel):
     @modifies_state
     def add_node(self, fieldx, fieldy):
         global _app_state
-        print(f'Add node at {fieldx}, {fieldy}')
         # Defaulting velocity and headings for now.
         new_waypoint = Waypoint(x=fieldx, y=fieldy, v=10, heading=0)
 
@@ -612,7 +621,6 @@ class FieldRenderPanel(wx.Panel):
     @modifies_state
     def del_node(self, x, y):
         global _app_state
-        print(f'Del node at {x}, {y}')
         self._selected_node = None
         delnode = self._find_closest_waypoint(x, y)
         current_routine = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
@@ -624,7 +632,6 @@ class FieldRenderPanel(wx.Panel):
     # select the closest waypoint to the click for modification
     # via the controls in the control panel UI
     def sel_node(self, x, y):
-        print(f'Select node at {x}, {y}')
         selnode = self._find_closest_waypoint(x, y)
         if selnode is not None:
             self._selected_node = selnode
@@ -992,14 +999,10 @@ class TransformationPanel(wx.Panel):
 
     @modifies_state
     def add_transformation(self, evt):
-        global _app_state
+        global _app_state, glb_field_render
         dlg = TransformDialog(None)
-        t = dlg.ShowModal()
-        for n, t in _app_state[TFMS].items():
-            print('Got a transformation', t.name)
-            for s in t.steps:
-                print(s.descr)
-        glb_field_panel.force_redraw()
+        dlg.ShowModal()
+        glb_field_render.force_redraw()
         self.update_transform_display()
         dlg.Destroy()
 
@@ -1017,10 +1020,8 @@ class TransformationPanel(wx.Panel):
         cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
         if name in cr.active_transformations:
             cr.active_transformations.remove(name)
-            print('Removing', name)
         else:
             cr.active_transformations.append(name)
-            print('Adding', name)
         self.update_transform_display()
         glb_field_render.force_redraw()
 
@@ -1064,14 +1065,9 @@ class TransformationPanel(wx.Panel):
     def edit_transformation(self, evt):
         global _app_state, glb_field_render
         name = evt.GetEventObject().GetName()
-        print('edit', name)
         dlg = TransformDialog(None)
         dlg.set_edit(_app_state[TFMS][name], name)
-        _ = dlg.ShowModal()
-        for n, t in _app_state[TFMS].items():
-            print('Got a transformation', n)
-            for s in t.steps:
-                print(s.descr)
+        dlg.ShowModal()
         glb_field_render.force_redraw()
         self.update_transform_display()
         dlg.Destroy()
@@ -1205,12 +1201,13 @@ class TransformDialog(wx.Dialog):
         self._mainvbox.Add(hbox, 0, ELR, border=border)
         self._mainvbox.AddSpacer(spacing)
 
-        self.SetTitle("Create/Edit Transformation")
+        self.SetTitle("Create Transformation")
 
         self.SetSizer(self._mainvbox)
         self.Fit()
 
     def set_edit(self, t, name):
+        self.SetTitle("Edit Transformation")
         self._transformation = deepcopy(t)
         self._orig_transformation = deepcopy(t)
         self._orig_name = name
