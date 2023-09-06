@@ -6,6 +6,8 @@ import sys
 import copy
 import json
 import math
+import scipy
+import functools
 import jsonpickle
 import numpy as np
 
@@ -281,6 +283,18 @@ def triangle_height(way1, way2, way3):
     return h
 
 
+def totuple(a):
+    try:
+        return tuple(totuple(i) for i in a)
+    except TypeError:
+        return a
+
+
+@functools.cache
+def lu_factor(M):
+    return scipy.linalg.lu_factor(M)
+
+
 # Given a 2D matrix of points to hit this will return two
 # matrices of the control points that can be used to make a smooth
 # cubic Bezier curve through them all.
@@ -314,17 +328,23 @@ def get_bezier_coef(points):
         print(C)
 
     # build points vector
-    P = [2 * (2 * points[i] + points[i + 1]) for i in range(n)]
-    P[0] = points[0] + 2 * points[1]
-    P[n - 1] = 8 * points[n - 1] + points[n]
+    point_vector = [2 * (2 * points[i] + points[i + 1]) for i in range(n)]
+    point_vector[0] = points[0] + 2 * points[1]
+    point_vector[n - 1] = 8 * points[n - 1] + points[n]
 
     if show_la:
         print('Point Vector')
-        print(P)
-    # TODO: Speed up. Not just for vanity but my laptop gets hot running
-    # this program if I wiggle a waypoint around.
-    # solve system aka find control points.
-    A = np.linalg.solve(C, P)
+        print(point_vector)
+
+    lu, piv = lu_factor(totuple(C))
+
+    if show_la:
+        print('lu')
+        print(lu)
+        print('piv')
+        print(piv)
+    A = scipy.linalg.lu_solve((lu, piv), point_vector)
+    # A = np.linalg.solve(C, point_vector)
     B = [0] * n
     for i in range(n - 1):
         B[i] = 2 * points[i + 1] - A[i + 1]
@@ -705,7 +725,6 @@ class FieldPanel(wx.Panel):
                                    self.toggle_draw_field_center)
         show_control_points_btn.Bind(wx.EVT_CHECKBOX,
                                      self.toggle_control_points)
-
 
         # The BoxSizer is a layout manager that arranges the controls in a box
         # which can be made vertical or horizontal.
@@ -1343,6 +1362,7 @@ def buildit():
         for t in [None] + routine.active_transformations:
             transform_name = def_trans if t is None else t
             rt = e(routine.name) + '_' + e(transform_name)
+            # TODO: Make make velocity, accel and jerk GUI elements
             route_str = f"""# {routine.name}
                 points_{rt} = [
                     {gen_pf_points(routine, None)}
