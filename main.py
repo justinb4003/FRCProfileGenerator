@@ -294,16 +294,9 @@ def totuple(a):
 def lu_factor(M):
     return scipy.linalg.lu_factor(M)
 
-
-# Given a 2D matrix of points to hit this will return two
-# matrices of the control points that can be used to make a smooth
-# cubic Bezier curve through them all.
-def get_bezier_coef(points):
+@functools.cache
+def get_bezier_matrix(n):
     show_la = False
-
-    # matrix is n x n, one less than total points
-    n = len(points) - 1
-
     # Complete documentation what we're doing is here:
     # https://towardsdatascience.com/b%C3%A9zier-interpolation-8033e9a262c2
 
@@ -327,6 +320,27 @@ def get_bezier_coef(points):
         print('Constants from derivatives')
         print(C)
 
+    return C
+
+
+# Given a 2D matrix of points to hit this will return two
+# matrices of the control points that can be used to make a smooth
+# cubic Bezier curve through them all.
+def get_bezier_coef(points):
+    show_la = False
+
+    # matrix is n x n, one less than total points
+    n = len(points) - 1
+    C = get_bezier_matrix(n)
+
+    lu, piv = lu_factor(totuple(C))
+
+    if show_la:
+        print('lu')
+        print(lu)
+        print('piv')
+        print(piv)
+
     # build points vector
     point_vector = [2 * (2 * points[i] + points[i + 1]) for i in range(n)]
     point_vector[0] = points[0] + 2 * points[1]
@@ -336,13 +350,6 @@ def get_bezier_coef(points):
         print('Point Vector')
         print(point_vector)
 
-    lu, piv = lu_factor(totuple(C))
-
-    if show_la:
-        print('lu')
-        print(lu)
-        print('piv')
-        print(piv)
     A = scipy.linalg.lu_solve((lu, piv), point_vector)
     # A = np.linalg.solve(C, point_vector)
     B = [0] * n
