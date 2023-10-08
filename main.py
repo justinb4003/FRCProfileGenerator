@@ -290,6 +290,11 @@ def totuple(a):
         return a
 
 
+# The cache decorator remembers the return value of a function after the first
+# time it is run for the given parameters. Subsequent calls don't have to
+# do any computation, they just return the previously constructed value.
+# This saves us a bit of a execution time but it only works if the function
+# will always return exactly the same thing given the same inputs
 @functools.cache
 def lu_factor(M):
     return scipy.linalg.lu_factor(M)
@@ -328,6 +333,7 @@ def get_bezier_matrix(n):
 # matrices of the control points that can be used to make a smooth
 # cubic Bezier curve through them all.
 def get_bezier_coef(points):
+    # If set to True we'll ouput some of the linear algebra as we compute it
     show_la = False
 
     # matrix is n x n, one less than total points
@@ -351,8 +357,15 @@ def get_bezier_coef(points):
         print('Point Vector')
         print(point_vector)
 
+    # this is where I'm playing with different ways of deconposing our matrix
+    # and computing the solution different ways.
+
+    # LU decomps are a bit easier on the CPU
     A = scipy.linalg.lu_solve((lu, piv), point_vector)
+
+    # simplest method, computationally expensive
     # A = np.linalg.solve(C, point_vector)
+
     B = [0] * n
     for i in range(n - 1):
         B[i] = 2 * points[i + 1] - A[i + 1]
@@ -437,6 +450,11 @@ class FieldRenderPanel(wx.Panel):
         field_offset_vec = np.array([_app_state[FIELD_X_OFFSET],
                                      _app_state[FIELD_Y_OFFSET]])
         cr = _app_state[ROUTINES][_app_state[CURRENT_ROUTINE]]
+        # We're going to iterate though the different paths we can make
+        # via mirroring and rotation, but the first one will use 'None'
+        # values to signal that we want to draw th original and transformations
+        # don't need to be done on it; aside from mapping field to screen
+        # points.
         for name, path_transformation in zip(
                 [None] + list(_app_state[TFMS].keys()),
                 [None] + list(_app_state[TFMS].values())):
