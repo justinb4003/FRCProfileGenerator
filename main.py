@@ -294,6 +294,7 @@ def totuple(a):
 def lu_factor(M):
     return scipy.linalg.lu_factor(M)
 
+
 @functools.cache
 def get_bezier_matrix(n):
     show_la = False
@@ -449,8 +450,10 @@ class FieldRenderPanel(wx.Panel):
                     continue
                 for s in path_transformation.steps:
                     if s.matrix is not None:
-                        final_matrix = np.dot(np.array(s.matrix), final_matrix)
+                        # Multiply the matrices
+                        final_matrix = np.array(s.matrix) @ final_matrix
                     elif s.vector is not None:
+                        # Add in the translation vector
                         final_vector += np.array(s.vector)
                     else:
                         print('unhandled ?')
@@ -463,7 +466,7 @@ class FieldRenderPanel(wx.Panel):
             points += field_offset_vec
             points += final_vector
             screen_points = points + v
-            screen_points = screen_points.dot(M)
+            screen_points = screen_points @ M
 
             # Draw path
             A, B = get_bezier_coef(screen_points)
@@ -537,7 +540,7 @@ class FieldRenderPanel(wx.Panel):
             [xoff, yoff+cross_size],
         ]).astype(float)
         field_points += np.array(v)
-        screen_points = np.array(field_points).dot(M)
+        screen_points = np.array(field_points) @ M
         screen_points = screen_points.astype(int)
         sx, sy = screen_points[0]
         ex, ey = screen_points[1]
@@ -570,7 +573,7 @@ class FieldRenderPanel(wx.Panel):
         M, v = get_transform_center_basis_to_screen()
         Minv = np.linalg.inv(M)
         field_points = np.array([[x, y]])
-        field_points = field_points.dot(Minv)
+        field_points = field_points @ (Minv)
         field_points = field_points - v
         fieldx = qtr_round(field_points[0][0])
         fieldy = qtr_round(field_points[0][1])
@@ -580,7 +583,7 @@ class FieldRenderPanel(wx.Panel):
         M, v = get_transform_center_basis_to_screen()
         field_points = np.array([[x, y]])
         field_points = field_points + v
-        field_points = field_points.dot(M)
+        field_points = field_points @ M
         screenx = int(field_points[0][0])
         screeny = int(field_points[0][1])
         return screenx, screeny
